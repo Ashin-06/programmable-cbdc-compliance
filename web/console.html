@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CBDCGuard — Programmable e-Rupee Policy VM & Offline Double-Spend Guard</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121a30;
+      --panel-alt: #17213c;
+      --border: #263459;
+      --text: #e8eefc;
+      --muted: #95a5c6;
+      --accent: #38bdf8;
+      --emerald: #10b981;
+      --amber: #f59e0b;
+      --rose: #f43f5e;
+      --mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .title-group h1 {
+      margin: 0;
+      font-size: 1.45rem;
+      letter-spacing: -0.02em;
+    }
+    .title-group p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .btn-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+    button {
+      background: var(--accent);
+      color: #061224;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 14px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.9; }
+    button.secondary {
+      background: var(--panel-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    button.danger {
+      background: var(--rose);
+      color: #fff;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .kpi-label {
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .kpi-val {
+      font-size: 1.55rem;
+      font-weight: 700;
+      font-family: var(--mono);
+      margin-top: 4px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 1024px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    select, input {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+      font-family: var(--sans);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-family: var(--mono);
+    }
+    .badge-ok { background: rgba(16, 185, 129, 0.18); color: #34d399; }
+    .badge-warn { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+    .badge-err { background: rgba(244, 63, 94, 0.2); color: #fb7185; }
+    pre {
+      background: #070b16;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      overflow-x: auto;
+      max-height: 260px;
+      margin: 10px 0 0;
+    }
+    .math-banner {
+      background: var(--panel-alt);
+      border-left: 3px solid var(--accent);
+      padding: 10px 14px;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      margin-bottom: 14px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-group">
+      <h1>CBDCGuard — Programmable e-Rupee (e₹) Policy VM & Offline Double-Spend Guard</h1>
+      <p>Purpose-Bound Money (PBM) Stack VM • Automatic Unwrap-on-Settlement • Cut-and-Choose Polynomial Identity Recovery</p>
+    </div>
+    <div class="btn-bar">
+      <button onclick="runBench()">Run 200+100 Benchmark</button>
+      <button class="secondary" onclick="sweepExpired()">Sweep Expired Subsidies</button>
+      <button class="secondary" onclick="resetLedger()">Reset Demo Ledger</button>
+    </div>
+  </header>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Unspent e₹ UTXOs</div>
+      <div class="kpi-val" id="kpi-unspent">-</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Approved Transfers</div>
+      <div class="kpi-val" id="kpi-approved" style="color: var(--emerald);">-</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Blocked Policy Violations</div>
+      <div class="kpi-val" id="kpi-blocked" style="color: var(--amber);">-</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Expired Treasury Sweeps</div>
+      <div class="kpi-val" id="kpi-swept">-</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Offline Double-Spends Unmasked</div>
+      <div class="kpi-val" id="kpi-ds" style="color: var(--rose);">-</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h2>
+        <span>1. Purpose-Bound Money (PBM) Policy Stack VM</span>
+        <span class="badge badge-ok">Deterministic Bytecode</span>
+      </h2>
+      <div class="form-row">
+        <div>
+          <label>Select UTXO Token</label>
+          <select id="tx-utxo"></select>
+        </div>
+        <div>
+          <label>Target Merchant (MCC / Region)</label>
+          <select id="tx-merchant"></select>
+        </div>
+        <div>
+          <label>Amount (₹)</label>
+          <input type="number" id="tx-amount" value="3000" step="100" />
+        </div>
+      </div>
+      <div class="btn-bar" style="margin-bottom: 12px;">
+        <button onclick="executeTransfer()">Evaluate Policy VM & Transfer</button>
+        <button class="secondary" onclick="mintQuickSubsidy()">+ Mint Agri Subsidy UTXO (₹10,000)</button>
+      </div>
+      <div id="vm-status" class="math-banner">Select a UTXO and merchant above to compile & execute PBM Stack VM bytecode.</div>
+      <pre id="vm-trace">// Stack VM Execution Trace will appear here...</pre>
+    </div>
+
+    <div class="card">
+      <h2>
+        <span>2. Offline NFC Polynomial Double-Spend Lab</span>
+        <span class="badge badge-warn">F_q Slope Interpolation</span>
+      </h2>
+      <div class="math-banner">
+        Line Commit: L(x) = (s·x + r) mod q &nbsp;|&nbsp; Verify: g^y ≡ (g^s)^x · g^r (mod p)<br/>
+        Double-Spend Recovery: s = (y₁ - y₂) · (x₁ - x₂)⁻¹ mod q
+      </div>
+      <div class="btn-bar" style="margin-bottom: 12px;">
+        <button class="secondary" onclick="honestOfflineSpend()">1. Honest Offline Spend (NFC-01)</button>
+        <button class="danger" onclick="simulateDoubleSpendAttack()">2. Simulate Cloned Double-Spend Attack (NFC-02)</button>
+        <button onclick="syncOffline()">3. Batch Sync with Central Bank</button>
+      </div>
+      <pre id="offline-output">// Offline NFC spend packets & cryptographic secret recovery logs will appear here...</pre>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h2>Active & Historical Programmable CBDC UTXOs</h2>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>UTXO ID</th>
+              <th>Owner</th>
+              <th>Amount (₹)</th>
+              <th>Policy Lock</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="utxo-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cryptographic Double-Spend Forensics & Benchmark Report</h2>
+      <pre id="bench-output">// Click "Run 200+100 Benchmark" or run an Offline Batch Sync to inspect results...</pre>
+    </div>
+  </div>
+
+  <script>
+    let currentState = null;
+
+    async function refreshState() {
+      const res = await fetch('/state');
+      currentState = await res.json();
+      const m = currentState.metrics;
+      document.getElementById('kpi-unspent').textContent = m.unspent_utxos;
+      document.getElementById('kpi-approved').textContent = m.approved_transfers;
+      document.getElementById('kpi-blocked').textContent = m.blocked_transfers;
+      document.getElementById('kpi-swept').textContent = m.swept_utxos;
+      document.getElementById('kpi-ds').textContent = m.double_spend_alerts_count;
+
+      const utxoSel = document.getElementById('tx-utxo');
+      const prevUtxo = utxoSel.value;
+      utxoSel.innerHTML = '';
+      currentState.utxos.filter(u => u.status === 'UNSPENT').forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.utxo_id;
+        opt.textContent = `${u.utxo_id} (${u.owner_id} • ₹${u.amount} • ${u.policy_id})`;
+        utxoSel.appendChild(opt);
+      });
+      if (prevUtxo) utxoSel.value = prevUtxo;
+
+      const merchSel = document.getElementById('tx-merchant');
+      if (merchSel.options.length === 0) {
+        currentState.merchants.forEach(mer => {
+          const opt = document.createElement('option');
+          opt.value = mer.merchant_id;
+          opt.textContent = `${mer.name} [MCC ${mer.mcc} • ${mer.region}${mer.verified ? '' : ' • UNVERIFIED'}]`;
+          merchSel.appendChild(opt);
+        });
+      }
+
+      const tbody = document.getElementById('utxo-tbody');
+      tbody.innerHTML = '';
+      currentState.utxos.slice().reverse().forEach(u => {
+        const tr = document.createElement('tr');
+        const badgeClass = u.status === 'UNSPENT' ? 'badge-ok' : (u.status === 'SPENT' ? 'badge-warn' : 'badge-err');
+        const unwrapNote = u.unwrapped_from_policy ? ` (Unwrapped from ${u.unwrapped_from_policy})` : '';
+        tr.innerHTML = `
+          <td style="font-family: var(--mono);">${u.utxo_id}</td>
+          <td>${u.owner_id}</td>
+          <td style="font-family: var(--mono);">₹${u.amount.toLocaleString()}</td>
+          <td><span class="badge badge-ok">${u.policy_id}</span>${unwrapNote}</td>
+          <td><span class="badge ${badgeClass}">${u.status}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function executeTransfer() {
+      const utxo_id = document.getElementById('tx-utxo').value;
+      const merchant_id = document.getElementById('tx-merchant').value;
+      const amount = parseFloat(document.getElementById('tx-amount').value);
+      const res = await fetch('/cbdc/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ utxo_id, merchant_id, amount })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        document.getElementById('vm-status').textContent = `Error: ${data.detail}`;
+        return;
+      }
+      const ev = data.eval_result;
+      if (data.approved) {
+        document.getElementById('vm-status').innerHTML =
+          `<span style="color: var(--emerald); font-weight:700;">APPROVED</span> • Gas: ${ev.gas_used} • ` +
+          (data.unwrapped ? `Auto-Unwrapped into General-Purpose e-Rupee (${data.new_merchant_utxo_id})` : `Settled (${data.new_merchant_utxo_id})`);
+      } else {
+        document.getElementById('vm-status').innerHTML =
+          `<span style="color: var(--rose); font-weight:700;">REJECTED (${ev.violation_code})</span> • ${ev.violation_detail}`;
+      }
+      document.getElementById('vm-trace').textContent = ev.trace.join('\n');
+      await refreshState();
+    }
+
+    async function mintQuickSubsidy() {
+      await fetch('/cbdc/mint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          owner_id: 'FARMER-KISAN-NEW',
+          amount: 10000,
+          policy_id: 'PBM-AGRI-01'
+        })
+      });
+      await refreshState();
+    }
+
+    async function sweepExpired() {
+      const res = await fetch('/cbdc/sweep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_timestamp: 1760000000 })
+      });
+      const data = await res.json();
+      document.getElementById('bench-output').textContent = JSON.stringify(data, null, 2);
+      await refreshState();
+    }
+
+    async function honestOfflineSpend() {
+      const res = await fetch('/offline/spend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet_id: 'WALLET-NFC-01',
+          coin_id: 'OFFCOIN-NFC01-001',
+          merchant_id: 'M-AGRI-PUNE',
+          nonce: 'nfc-honest-' + Math.floor(Math.random() * 99999),
+          simulate_double_spend: false
+        })
+      });
+      const data = await res.json();
+      document.getElementById('offline-output').textContent = JSON.stringify(data, null, 2);
+      await refreshState();
+    }
+
+    async function simulateDoubleSpendAttack() {
+      const r1 = await fetch('/offline/spend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet_id: 'WALLET-NFC-02',
+          coin_id: 'OFFCOIN-NFC02-001',
+          merchant_id: 'M-AGRI-PUNE',
+          timestamp: 1760005001,
+          nonce: 'terminal-A-nonce-01',
+          simulate_double_spend: true
+        })
+      });
+      const d1 = await r1.json();
+
+      const r2 = await fetch('/offline/spend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet_id: 'WALLET-NFC-02',
+          coin_id: 'OFFCOIN-NFC02-001',
+          merchant_id: 'M-FOOD-MUM',
+          timestamp: 1760005099,
+          nonce: 'terminal-B-nonce-02',
+          simulate_double_spend: true
+        })
+      });
+      const d2 = await r2.json();
+      document.getElementById('offline-output').textContent = JSON.stringify(
+        { attack_simulation: "Two distinct NFC transcripts generated for same coin OFFCOIN-NFC02-001", leg_1: d1, leg_2: d2 },
+        null,
+        2
+      );
+      await refreshState();
+    }
+
+    async function syncOffline() {
+      const res = await fetch('/offline/sync', { method: 'POST' });
+      const data = await res.json();
+      document.getElementById('offline-output').textContent = JSON.stringify(data, null, 2);
+      document.getElementById('bench-output').textContent = JSON.stringify(data, null, 2);
+      await refreshState();
+    }
+
+    async function runBench() {
+      const res = await fetch('/bench');
+      const data = await res.json();
+      document.getElementById('bench-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function resetLedger() {
+      await fetch('/reset', { method: 'POST' });
+      await refreshState();
+    }
+
+    refreshState();
+  </script>
+</body>
+</html>
