@@ -317,3 +317,19 @@ def test_ledger_rejects_reused_ids_and_nan_amounts() -> None:
     from cbdcguard.policy_vm import PBMPolicy as _P
     with pytest.raises(ValueError):  # would re-scope every UTXO bound to PBM-AGRI-01
         ledger.register_policy(_P(policy_id="PBM-AGRI-01", name="anything goes"))
+
+
+def test_api_key_and_input_limits(monkeypatch) -> None:
+    import cbdcguard.api as api
+
+    client = TestClient(app)
+    monkeypatch.setattr(api, "API_KEY", "s3cret")
+    assert client.post("/reset").status_code == 401
+    assert client.post("/cbdc/mint", json={"owner_id": "X", "amount": 1e6}).status_code == 401
+    assert client.get("/health").status_code == 200
+    hdr = {"X-API-Key": "s3cret"}
+    assert client.post("/reset", headers=hdr).status_code == 200
+    assert client.post("/cbdc/mint", json={"owner_id": "X", "amount": 1e12}, headers=hdr).status_code == 422
+    assert client.post("/cbdc/mint", json={"owner_id": "x" * 65, "amount": 10}, headers=hdr).status_code == 422
+    r = client.post("/cbdc/mint", json={"owner_id": "X", "amount": 10, "utxo_id": "UTXO-AGRI-101"}, headers=hdr)
+    assert r.status_code == 400  # reused UTXO ID
