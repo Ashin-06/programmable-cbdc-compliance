@@ -199,8 +199,8 @@ def test_full_benchmark_200_programmable_and_100_offline() -> None:
     assert off["double_spends_detected"] == 25
     assert off["exact_secret_keys_recovered"] == 25
     assert off["double_spend_recovery_rate_pct"] == 100.0
-    assert off["honest_key_leakage_count"] == 0
-    assert off["honest_key_leakage_rate_pct"] == 0.0
+    assert off["honest_wallets_flagged_count"] == 0
+    assert off["honest_wallets_flagged_rate_pct"] == 0.0
 
 
 def test_fastapi_endpoints() -> None:

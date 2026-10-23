@@ -15,7 +15,8 @@ def run_benchmark() -> dict[str, Any]:
     Verifies:
       - 100% policy enforcement accuracy across all 200 programmable CBDC transactions
       - 100% secret key recovery rate across all 25 offline double-spend attacks
-      - 0% secret key leakage across all 75 honest single-show offline spends
+      - no honest wallet is flagged or slashed across the 75 single-show offline spends
+    (that a single answer reveals nothing about s follows from r being uniform; it is not measured)
     """
     t0 = time.perf_counter()
     ledger = CBDCLedger()
@@ -212,7 +213,7 @@ def run_benchmark() -> dict[str, Any]:
             "double_spends_detected": sync_report["double_spends_detected"],
             "exact_secret_keys_recovered": exact_recoveries,
             "double_spend_recovery_rate_pct": round(100.0 * exact_recoveries / double_spend_attacks_count, 2),
-            "honest_key_leakage_count": honest_leaks,
-            "honest_key_leakage_rate_pct": round(100.0 * honest_leaks / honest_coins_count, 2),
+            "honest_wallets_flagged_count": honest_leaks,
+            "honest_wallets_flagged_rate_pct": round(100.0 * honest_leaks / honest_coins_count, 2),
         },
     }

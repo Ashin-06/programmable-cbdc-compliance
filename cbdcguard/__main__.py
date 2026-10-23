@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         if (
             prog["policy_enforcement_accuracy_pct"] != 100.0
             or off["double_spend_recovery_rate_pct"] != 100.0
-            or off["honest_key_leakage_rate_pct"] != 0.0
+            or off["honest_wallets_flagged_rate_pct"] != 0.0
         ):
             return 1
         return 0
