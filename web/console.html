@@ -189,6 +189,7 @@
       <p>Purpose-Bound Money (PBM) Stack VM • Automatic Unwrap-on-Settlement • Cut-and-Choose Polynomial Identity Recovery</p>
     </div>
     <div class="btn-bar">
+      <input type="password" id="apiKey" placeholder="X-API-Key (if set)" autocomplete="off" />
       <button onclick="runBench()">Run 200+100 Benchmark</button>
       <button class="secondary" onclick="sweepExpired()">Sweep Expired Subsidies</button>
       <button class="secondary" onclick="resetLedger()">Reset Demo Ledger</button>
@@ -292,6 +293,17 @@
   <script>
     let currentState = null;
 
+    // Send the API key (if one is entered) with every request this page makes
+    const _fetch = window.fetch.bind(window);
+    window.fetch = (url, opts = {}) => {
+      const key = document.getElementById('apiKey').value;
+      return key ? _fetch(url, { ...opts, headers: { ...(opts.headers || {}), 'X-API-Key': key } }) : _fetch(url, opts);
+    };
+
+    function esc(v) {
+      return String(v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
     async function refreshState() {
       const res = await fetch('/state');
       currentState = await res.json();
@@ -328,13 +340,13 @@
       currentState.utxos.slice().reverse().forEach(u => {
         const tr = document.createElement('tr');
         const badgeClass = u.status === 'UNSPENT' ? 'badge-ok' : (u.status === 'SPENT' ? 'badge-warn' : 'badge-err');
-        const unwrapNote = u.unwrapped_from_policy ? ` (Unwrapped from ${u.unwrapped_from_policy})` : '';
+        const unwrapNote = u.unwrapped_from_policy ? ` (Unwrapped from ${esc(u.unwrapped_from_policy)})` : '';
         tr.innerHTML = `
-          <td style="font-family: var(--mono);">${u.utxo_id}</td>
-          <td>${u.owner_id}</td>
+          <td style="font-family: var(--mono);">${esc(u.utxo_id)}</td>
+          <td>${esc(u.owner_id)}</td>
           <td style="font-family: var(--mono);">₹${u.amount.toLocaleString()}</td>
-          <td><span class="badge badge-ok">${u.policy_id}</span>${unwrapNote}</td>
-          <td><span class="badge ${badgeClass}">${u.status}</span></td>
+          <td><span class="badge badge-ok">${esc(u.policy_id)}</span>${unwrapNote}</td>
+          <td><span class="badge ${badgeClass}">${esc(u.status)}</span></td>
         `;
         tbody.appendChild(tr);
       });
@@ -358,10 +370,10 @@
       if (data.approved) {
         document.getElementById('vm-status').innerHTML =
           `<span style="color: var(--emerald); font-weight:700;">APPROVED</span> • Gas: ${ev.gas_used} • ` +
-          (data.unwrapped ? `Auto-Unwrapped into General-Purpose e-Rupee (${data.new_merchant_utxo_id})` : `Settled (${data.new_merchant_utxo_id})`);
+          (data.unwrapped ? `Auto-Unwrapped into General-Purpose e-Rupee (${esc(data.new_merchant_utxo_id)})` : `Settled (${esc(data.new_merchant_utxo_id)})`);
       } else {
         document.getElementById('vm-status').innerHTML =
-          `<span style="color: var(--rose); font-weight:700;">REJECTED (${ev.violation_code})</span> • ${ev.violation_detail}`;
+          `<span style="color: var(--rose); font-weight:700;">REJECTED (${esc(ev.violation_code)})</span> • ${esc(ev.violation_detail)}`;
       }
       document.getElementById('vm-trace').textContent = ev.trace.join('\n');
       await refreshState();
