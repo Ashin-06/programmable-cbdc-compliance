@@ -7,7 +7,7 @@ import pytest
 
 from cbdcguard.api import app
 from cbdcguard.bench import run_benchmark
-from cbdcguard.ledger import CBDCLedger, build_demo_ledger
+from cbdcguard.ledger import build_demo_ledger
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from cbdcguard.offline import (
@@ -18,7 +18,6 @@ from cbdcguard.offline import (
 )
 from cbdcguard.policy_vm import (
     OpCode,
-    PBMPolicy,
     PolicyCompiler,
     PolicyStackVM,
     SpendContext,
