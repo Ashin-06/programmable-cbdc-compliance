@@ -515,12 +515,15 @@ class PolicyStackVM:
 
 
 def build_preset_policies() -> dict[str, PBMPolicy]:
-    """Standard RBI / Digital India e-Rupee Purpose-Bound Money (PBM) policy templates."""
+    """
+    Illustrative purpose-bound money policies. They are invented examples, not RBI rules or the
+    terms of any real government scheme.
+    """
 
     return {
         "PBM-AGRI-01": PBMPolicy(
             policy_id="PBM-AGRI-01",
-            name="PM-KISAN Agri Seed & Fertilizer Subsidy",
+            name="Agricultural Input Subsidy (Seeds & Fertiliser)",
             description="Purpose-bound agricultural input voucher restricted to seed & fertilizer merchants (MCC 5191, 5261) in Maharashtra & Karnataka.",
             sponsor_id="MINISTRY-AGRI-TREASURY",
             allowed_mccs={5191, 5261},
@@ -535,9 +538,9 @@ def build_preset_policies() -> dict[str, PBMPolicy]:
         ),
         "PBM-FOOD-02": PBMPolicy(
             policy_id="PBM-FOOD-02",
-            name="PDS Nutritional & Grocery e-Voucher",
+            name="Food & Grocery Voucher",
             description="Food security CBDC token redeemable only at verified grocery & food outlets (MCC 5411, 5812).",
-            sponsor_id="FOOD-CORP-INDIA",
+            sponsor_id="FOOD-VOUCHER-SPONSOR",
             allowed_mccs={5411, 5812},
             blocked_mccs={7995, 6011},
             allowed_regions={"IN-MH", "IN-KA", "IN-DL", "IN-TN", "IN-UP", "IN-WB"},
@@ -550,9 +553,9 @@ def build_preset_policies() -> dict[str, PBMPolicy]:
         ),
         "PBM-HEALTH-03": PBMPolicy(
             policy_id="PBM-HEALTH-03",
-            name="Ayushman Bharat Healthcare & Hospital Grant",
+            name="Healthcare & Hospital Voucher",
             description="Healthcare e-Rupee token restricted to accredited clinics, doctors & hospitals (MCC 8011, 8062, 5912).",
-            sponsor_id="NHA-AYUSHMAN-TREASURY",
+            sponsor_id="HEALTH-VOUCHER-SPONSOR",
             allowed_mccs={8011, 8062, 5912},
             blocked_mccs={7995, 6011},
             allowed_regions={"IN-MH", "IN-KA", "IN-DL", "IN-TN", "IN-GJ", "IN-UP"},
