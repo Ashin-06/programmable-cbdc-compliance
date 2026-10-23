@@ -8,14 +8,13 @@ import pytest
 from cbdcguard.api import app
 from cbdcguard.bench import run_benchmark
 from cbdcguard.ledger import CBDCLedger, build_demo_ledger
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from cbdcguard.offline import (
-    GENERATOR_G,
-    PRIME_P,
-    PRIME_Q,
+    ED25519_L,
     OfflineWallet,
-    derive_challenge_x,
+    public_point,
     recover_double_spend_secret,
-    verify_offline_proof,
 )
 from cbdcguard.policy_vm import (
     OpCode,
@@ -101,8 +100,10 @@ def test_pbm_policy_vm_blocks_violations() -> None:
 
 
 def test_offline_polynomial_single_show_privacy_and_double_spend_recovery() -> None:
+    issuer = Ed25519PrivateKey.generate()
+    issuer_pub = issuer.public_key()
     wallet = OfflineWallet.create("W-TEST-01", "Test User", collateral_balance=10000.0)
-    coin = wallet.mint_coin(amount=500.0, coin_id="COIN-TEST-01")
+    coin = wallet.mint_coin(amount=500.0, coin_id="COIN-TEST-01", issuer_key=issuer)
 
     # Honest first spend at terminal 1
     pkt1 = wallet.sign_offline_spend(
@@ -112,14 +113,14 @@ def test_offline_polynomial_single_show_privacy_and_double_spend_recovery() -> N
         nonce="nonce-alpha",
         allow_counter_rollback=False,
     )
-    assert pkt1.verify_terminal_proof() is True
+    assert pkt1.verify_terminal_proof(issuer_pub) is True
 
     # Information-theoretic single-show privacy proof:
     # For any arbitrary candidate secret s_fake in F_q, there exists a valid blinding scalar r_fake
     # such that (s_fake * x1 + r_fake) mod q == y1.
-    s_fake = (wallet.secret_s + 123456789) % PRIME_Q
-    r_fake = (pkt1.response_y - s_fake * pkt1.challenge_x) % PRIME_Q
-    assert (s_fake * pkt1.challenge_x + r_fake) % PRIME_Q == pkt1.response_y
+    s_fake = (wallet.secret_s + 123456789) % ED25519_L
+    r_fake = (pkt1.response_y - s_fake * pkt1.challenge_x) % ED25519_L
+    assert (s_fake * pkt1.challenge_x + r_fake) % ED25519_L == pkt1.response_y
 
     # Hardware counter blocks accidental second spend unless rollback is forced
     with pytest.raises(ValueError, match="Hardware monotonic counter guard"):
@@ -139,7 +140,7 @@ def test_offline_polynomial_single_show_privacy_and_double_spend_recovery() -> N
         nonce="nonce-beta",
         allow_counter_rollback=True,
     )
-    assert pkt2.verify_terminal_proof() is True
+    assert pkt2.verify_terminal_proof(issuer_pub) is True
     assert pkt1.challenge_x != pkt2.challenge_x
 
     # Central bank interpolates s = (y1 - y2) * (x1 - x2)^(-1) mod q
@@ -148,7 +149,7 @@ def test_offline_polynomial_single_show_privacy_and_double_spend_recovery() -> N
     )
     assert s_rec == wallet.secret_s
     assert r_rec == coin.blinding_r
-    assert pow(GENERATOR_G, s_rec, PRIME_P) == wallet.commitment_s
+    assert public_point(s_rec) == wallet.commitment_s
 
 
 def test_ledger_unwrap_on_settlement_and_expiry_clawback() -> None:
@@ -262,3 +263,22 @@ def test_fastapi_endpoints() -> None:
     r_bench = client.get("/bench")
     assert r_bench.status_code == 200
     assert r_bench.json()["programmable_cbdc"]["policy_enforcement_accuracy_pct"] == 100.0
+
+
+def test_terminal_rejects_coins_the_issuer_did_not_sign() -> None:
+    # The old scheme checked the proof against commitments inside the packet itself, so anyone
+    # could invent a coin of any amount. Now the terminal needs the issuer's signature.
+    ledger = build_demo_ledger()
+    forger = OfflineWallet.create("W-FORGER", "Forger")
+    fake = forger.mint_coin(amount=99999.0, coin_id="OFFCOIN-FAKE")  # no issuer key
+    pkt = forger.sign_offline_spend(fake.coin_id, "M-AGRI-PUNE", 1_760_000_000, "n1")
+    assert pkt.verify_terminal_proof(ledger.issuer_public_key) is False
+    other_issuer = Ed25519PrivateKey.generate()
+    fake2 = forger.mint_coin(amount=99999.0, coin_id="OFFCOIN-FAKE2", issuer_key=other_issuer)
+    pkt2 = forger.sign_offline_spend(fake2.coin_id, "M-AGRI-PUNE", 1_760_000_000, "n2")
+    assert pkt2.verify_terminal_proof(ledger.issuer_public_key) is False
+    # Raising the amount on a genuine coin breaks the signature too
+    from dataclasses import replace
+    good = ledger.execute_offline_spend("WALLET-NFC-01", "OFFCOIN-NFC01-001", "M-AGRI-PUNE")
+    assert good.verify_terminal_proof(ledger.issuer_public_key)
+    assert not replace(good, amount=50000.0).verify_terminal_proof(ledger.issuer_public_key)

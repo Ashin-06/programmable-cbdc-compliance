@@ -252,7 +252,7 @@
         <span class="badge badge-warn">F_q Slope Interpolation</span>
       </h2>
       <div class="math-banner">
-        Line Commit: L(x) = (s·x + r) mod q &nbsp;|&nbsp; Verify: g^y ≡ (g^s)^x · g^r (mod p)<br/>
+        Line Commit: L(x) = s·x + r mod L &nbsp;|&nbsp; Verify: issuer signature and y·G = x·S + R (Ed25519)<br/>
         Double-Spend Recovery: s = (y₁ - y₂) · (x₁ - x₂)⁻¹ mod q
       </div>
       <div class="btn-bar" style="margin-bottom: 12px;">

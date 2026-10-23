@@ -1,4 +1,20 @@
-"""Cut-and-Choose / Single-Show Polynomial Offline CBDC Double-Spend Identity Recovery."""
+"""
+Single-Show Offline CBDC Spends with Double-Spend Identity Recovery.
+
+A wallet holds a secret scalar s with public key S = s*G. Each offline coin carries a fresh
+random scalar r with R = r*G, and the issuer (central bank) signs (coin_id, wallet, counter,
+amount, S, R) with Ed25519 when the coin is withdrawn. To spend, the merchant terminal derives a
+challenge x from its own ID, time, nonce and the coin, and the wallet answers y = s*x + r mod L.
+The terminal checks the issuer signature and y*G == x*S + R without going online.
+
+- One answer reveals nothing about s, because r is uniform and used once.
+- Two answers to different challenges on the same coin give s = (y1 - y2) / (x1 - x2) mod L,
+  which proves the double spend and identifies the wallet.
+
+Group arithmetic is libsodium's Ed25519 prime-order subgroup (through PyNaCl); signatures use
+`cryptography`. This is a reference implementation for study, not reviewed cryptography, and it
+does not make payments unlinkable: every coin carries the wallet's public key S.
+"""
 
 from __future__ import annotations
 
@@ -7,59 +23,84 @@ import hashlib
 import secrets
 from typing import Any
 
-# Safe prime p = 2*q + 1 (128-bit Schnorr subgroup G_q of prime order q with generator g = 4)
-PRIME_Q: int = 170141183460469231731687303715884111953
-PRIME_P: int = 340282366920938463463374607431768223907
-GENERATOR_G: int = 4
+import nacl.bindings as sodium
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+# Order of the Ed25519 prime-order subgroup
+ED25519_L: int = 2**252 + 27742317777372353535851937790883648493
+_IDENTITY = bytes([1]) + bytes(31)
 
 
-def derive_challenge_x(merchant_id: str, timestamp: int, nonce: str, q: int = PRIME_Q) -> int:
-    """Compute merchant terminal challenge x = H(merchant_id || timestamp || nonce) mod q in [1, q-1]."""
-    payload = f"{merchant_id}||{timestamp}||{nonce}".encode("utf-8")
-    digest = int.from_bytes(hashlib.sha256(payload).digest(), byteorder="big")
-    return (digest % (q - 1)) + 1
+def _scalar(k: int) -> bytes:
+    return (k % ED25519_L).to_bytes(32, "little")
 
 
-def verify_offline_proof(
-    challenge_x: int,
-    response_y: int,
-    commitment_s: int,
-    commitment_r: int,
-    p: int = PRIME_P,
-    q: int = PRIME_Q,
-    g: int = GENERATOR_G,
-) -> bool:
-    """
-    Verify offline spend proof without central bank connectivity:
-        g^y == (g^s)^x * g^r (mod p)
-    Since g has prime order q modulo p, exponent arithmetic mod q maps homomorphically to mod p.
-    """
-    if not (1 <= challenge_x < q and 0 <= response_y < q):
+def _base_mul(k: int) -> bytes:
+    k %= ED25519_L
+    return _IDENTITY if k == 0 else sodium.crypto_scalarmult_ed25519_base_noclamp(_scalar(k))
+
+
+def _mul(point: bytes, k: int) -> bytes:
+    k %= ED25519_L
+    return _IDENTITY if k == 0 else sodium.crypto_scalarmult_ed25519_noclamp(_scalar(k), point)
+
+
+def random_scalar() -> int:
+    return 1 + secrets.randbelow(ED25519_L - 1)
+
+
+def public_point(secret: int) -> bytes:
+    return _base_mul(secret)
+
+
+def is_prime_order_point(p: Any) -> bool:
+    """Canonical, non-identity point of the prime-order subgroup (L*P == identity)."""
+    if not (isinstance(p, bytes) and len(p) == 32 and sodium.crypto_core_ed25519_is_valid_point(p)):
         return False
-    lhs = pow(g, response_y, p)
-    rhs = (pow(commitment_s, challenge_x, p) * (commitment_r % p)) % p
-    return lhs == rhs
+    return sodium.crypto_core_ed25519_add(_mul(p, ED25519_L - 1), p) == _IDENTITY
 
 
-def recover_double_spend_secret(
-    x1: int,
-    y1: int,
-    x2: int,
-    y2: int,
-    q: int = PRIME_Q,
-) -> tuple[int, int]:
+def derive_challenge_x(merchant_id: str, timestamp: int, nonce: str, coin_id: str) -> int:
+    """Terminal challenge x = H(merchant_id || timestamp || nonce || coin_id) in [1, L-1]."""
+    payload = "\x1f".join([merchant_id, str(timestamp), nonce, coin_id]).encode("utf-8")
+    digest = int.from_bytes(hashlib.sha512(b"cbdcguard.challenge.v2|" + payload).digest(), "big")
+    return (digest % (ED25519_L - 1)) + 1
+
+
+def coin_message(coin_id: str, wallet_id: str, counter: int, amount_paise: int, commitment_s: bytes, commitment_r: bytes) -> bytes:
+    """Bytes the issuer signs for an offline coin."""
+    return b"|".join([
+        b"cbdcguard.offline_coin.v2",
+        coin_id.encode("utf-8"),
+        wallet_id.encode("utf-8"),
+        str(counter).encode(),
+        str(amount_paise).encode(),
+        commitment_s,
+        commitment_r,
+    ])
+
+
+def verify_offline_proof(challenge_x: int, response_y: int, commitment_s: bytes, commitment_r: bytes) -> bool:
+    """Check y*G == x*S + R, with S and R in the prime-order subgroup."""
+    if not (1 <= challenge_x < ED25519_L and 0 <= response_y < ED25519_L):
+        return False
+    if not (is_prime_order_point(commitment_s) and is_prime_order_point(commitment_r)):
+        return False
+    rhs = sodium.crypto_core_ed25519_add(_mul(commitment_s, challenge_x), commitment_r)
+    return _base_mul(response_y) == rhs
+
+
+def recover_double_spend_secret(x1: int, y1: int, x2: int, y2: int) -> tuple[int, int]:
     """
-    Recover the spender's secret identity scalar s and per-coin blinding scalar r
-    from two distinct challenge-response transcripts (x1, y1) and (x2, y2) on the same coin:
-        s = (y1 - y2) * (x1 - x2)^(-1) mod q
-        r = (y1 - s * x1) mod q
+    Recover s and r from two answers on the same coin:
+        s = (y1 - y2) * (x1 - x2)^(-1) mod L,  r = (y1 - s * x1) mod L
     """
-    dx = (x1 - x2) % q
+    dx = (x1 - x2) % ED25519_L
     if dx == 0:
-        raise ValueError("Challenges x1 and x2 must be distinct to interpolate line L(x) = s*x + r mod q")
-    inv_dx = pow(dx, -1, q)
-    s_recovered = ((y1 - y2) * inv_dx) % q
-    r_recovered = (y1 - s_recovered * x1) % q
+        raise ValueError("Challenges x1 and x2 must be distinct to interpolate L(x) = s*x + r")
+    s_recovered = ((y1 - y2) * pow(dx, -1, ED25519_L)) % ED25519_L
+    r_recovered = (y1 - s_recovered * x1) % ED25519_L
     return s_recovered, r_recovered
 
 
@@ -72,9 +113,17 @@ class OfflineCoin:
     counter: int
     amount: float
     blinding_r: int
-    commitment_s: int
-    commitment_r: int
+    commitment_s: bytes
+    commitment_r: bytes
+    issuer_signature: bytes = b""
     spent_count: int = 0
+
+    @property
+    def amount_paise(self) -> int:
+        return round(self.amount * 100)
+
+    def message(self) -> bytes:
+        return coin_message(self.coin_id, self.wallet_id, self.counter, self.amount_paise, self.commitment_s, self.commitment_r)
 
     def to_public_dict(self) -> dict[str, Any]:
         """Public view of the coin (never exposes blinding_r)."""
@@ -83,20 +132,21 @@ class OfflineCoin:
             "wallet_id": self.wallet_id,
             "counter": self.counter,
             "amount": self.amount,
-            "commitment_s_hex": hex(self.commitment_s),
-            "commitment_r_hex": hex(self.commitment_r),
+            "commitment_s_hex": self.commitment_s.hex(),
+            "commitment_r_hex": self.commitment_r.hex(),
+            "issuer_signature_hex": self.issuer_signature.hex(),
             "spent_count": self.spent_count,
         }
 
 
 @dataclass
 class OfflineWallet:
-    """Hardware-backed offline CBDC wallet holding secret identity scalar s in F_q."""
+    """Hardware-backed offline CBDC wallet holding secret identity scalar s."""
 
     wallet_id: str
     owner_name: str
     secret_s: int
-    commitment_s: int
+    commitment_s: bytes
     collateral_balance: float = 25000.0
     monotonic_counter: int = 0
     slashed: bool = False
@@ -112,13 +162,12 @@ class OfflineWallet:
         collateral_balance: float = 25000.0,
         secret_s: int | None = None,
     ) -> OfflineWallet:
-        s = secret_s if secret_s is not None else (secrets.randbelow(PRIME_Q - 2) + 2)
-        comm_s = pow(GENERATOR_G, s, PRIME_P)
+        s = secret_s if secret_s is not None else random_scalar()
         return cls(
             wallet_id=wallet_id,
             owner_name=owner_name,
             secret_s=s,
-            commitment_s=comm_s,
+            commitment_s=public_point(s),
             collateral_balance=collateral_balance,
         )
 
@@ -127,14 +176,17 @@ class OfflineWallet:
         amount: float,
         coin_id: str | None = None,
         blinding_r: int | None = None,
+        issuer_key: Ed25519PrivateKey | None = None,
     ) -> OfflineCoin:
-        """Mint an offline coin committed to L(x) = (s*x + r) mod q with incremented monotonic counter."""
+        """Create a coin committed to L(x) = s*x + r; the issuer signs it if a key is given."""
         if self.slashed:
             raise ValueError(f"Offline wallet '{self.wallet_id}' is slashed and blacklisted.")
+        cid = coin_id or f"OFFCOIN-{self.wallet_id}-{self.monotonic_counter + 1:03d}"
+        if cid in self.coins:
+            # Re-minting an existing ID would reset its spend counter and allow a re-spend
+            raise ValueError(f"Coin ID '{cid}' already exists in wallet '{self.wallet_id}'.")
         self.monotonic_counter += 1
-        r = blinding_r if blinding_r is not None else (secrets.randbelow(PRIME_Q - 2) + 2)
-        comm_r = pow(GENERATOR_G, r, PRIME_P)
-        cid = coin_id or f"OFFCOIN-{self.wallet_id}-{self.monotonic_counter:03d}"
+        r = blinding_r if blinding_r is not None else random_scalar()
         coin = OfflineCoin(
             coin_id=cid,
             wallet_id=self.wallet_id,
@@ -142,8 +194,10 @@ class OfflineWallet:
             amount=float(amount),
             blinding_r=r,
             commitment_s=self.commitment_s,
-            commitment_r=comm_r,
+            commitment_r=public_point(r),
         )
+        if issuer_key is not None:
+            coin.issuer_signature = issuer_key.sign(coin.message())
         self.coins[cid] = coin
         return coin
 
@@ -156,7 +210,7 @@ class OfflineWallet:
         allow_counter_rollback: bool = False,
     ) -> OfflineSpendPacket:
         """
-        Evaluate polynomial L(x) = (s * x + r) mod q at terminal challenge x.
+        Evaluate L(x) = s*x + r mod L at the terminal challenge x.
         If coin was already spent and allow_counter_rollback=False, Secure Element blocks re-spend.
         If allow_counter_rollback=True (simulating physical fault injection / cloned SE), produces a 2nd transcript.
         """
@@ -168,8 +222,8 @@ class OfflineWallet:
                 f"Hardware monotonic counter guard blocked re-spend of coin '{coin_id}' "
                 f"(counter={coin.counter}). Set allow_counter_rollback=True to simulate clone attack."
             )
-        x = derive_challenge_x(merchant_id=merchant_id, timestamp=timestamp, nonce=nonce)
-        y = (self.secret_s * x + coin.blinding_r) % PRIME_Q
+        x = derive_challenge_x(merchant_id=merchant_id, timestamp=timestamp, nonce=nonce, coin_id=coin.coin_id)
+        y = (self.secret_s * x + coin.blinding_r) % ED25519_L
         coin.spent_count += 1
         return OfflineSpendPacket(
             packet_id=f"PKT-{coin.coin_id}-{coin.spent_count}-{nonce[:6]}",
@@ -184,13 +238,14 @@ class OfflineWallet:
             response_y=y,
             commitment_s=coin.commitment_s,
             commitment_r=coin.commitment_r,
+            issuer_signature=coin.issuer_signature,
         )
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
             "wallet_id": self.wallet_id,
             "owner_name": self.owner_name,
-            "commitment_s_hex": hex(self.commitment_s),
+            "commitment_s_hex": self.commitment_s.hex(),
             "collateral_balance": self.collateral_balance,
             "monotonic_counter": self.monotonic_counter,
             "slashed": self.slashed,
@@ -202,7 +257,7 @@ class OfflineWallet:
 
 @dataclass(frozen=True)
 class OfflineSpendPacket:
-    """Single-show polynomial proof packet transmitted over NFC to an offline merchant POS terminal."""
+    """Single-show proof packet transmitted over NFC to an offline merchant POS terminal."""
 
     packet_id: str
     coin_id: str
@@ -214,20 +269,27 @@ class OfflineSpendPacket:
     nonce: str
     challenge_x: int
     response_y: int
-    commitment_s: int
-    commitment_r: int
+    commitment_s: bytes
+    commitment_r: bytes
+    issuer_signature: bytes = b""
 
-    def verify_terminal_proof(self) -> bool:
-        """Verify g^y == (g^s)^x * g^r (mod p) offline at the merchant terminal."""
-        expected_x = derive_challenge_x(self.merchant_id, self.timestamp, self.nonce)
+    def verify_terminal_proof(self, issuer_public_key: Ed25519PublicKey) -> bool:
+        """
+        What an offline terminal can check: the issuer signed this coin (so it was really
+        withdrawn, for this amount), the challenge is the terminal's own, and y*G == x*S + R.
+        """
+        try:
+            issuer_public_key.verify(
+                self.issuer_signature,
+                coin_message(self.coin_id, self.wallet_id, self.counter, round(self.amount * 100),
+                             self.commitment_s, self.commitment_r),
+            )
+        except InvalidSignature:
+            return False
+        expected_x = derive_challenge_x(self.merchant_id, self.timestamp, self.nonce, self.coin_id)
         if expected_x != self.challenge_x:
             return False
-        return verify_offline_proof(
-            challenge_x=self.challenge_x,
-            response_y=self.response_y,
-            commitment_s=self.commitment_s,
-            commitment_r=self.commitment_r,
-        )
+        return verify_offline_proof(self.challenge_x, self.response_y, self.commitment_s, self.commitment_r)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -241,9 +303,9 @@ class OfflineSpendPacket:
             "nonce": self.nonce,
             "challenge_x_hex": hex(self.challenge_x),
             "response_y_hex": hex(self.response_y),
-            "commitment_s_hex": hex(self.commitment_s),
-            "commitment_r_hex": hex(self.commitment_r),
-            "proof_valid": self.verify_terminal_proof(),
+            "commitment_s_hex": self.commitment_s.hex(),
+            "commitment_r_hex": self.commitment_r.hex(),
+            "issuer_signature_hex": self.issuer_signature.hex(),
         }
 
 
@@ -264,7 +326,7 @@ class DoubleSpendAlert:
     y2: int
     recovered_secret_s: int
     recovered_blinding_r: int
-    commitment_s: int
+    commitment_s: bytes
     verified_against_commitment: bool
     slashed_collateral: float
 
@@ -283,8 +345,8 @@ class DoubleSpendAlert:
             "y2_hex": hex(self.y2),
             "recovered_secret_s_hex": hex(self.recovered_secret_s),
             "recovered_blinding_r_hex": hex(self.recovered_blinding_r),
-            "commitment_s_hex": hex(self.commitment_s),
+            "commitment_s_hex": self.commitment_s.hex(),
             "verified_against_commitment": self.verified_against_commitment,
             "slashed_collateral": self.slashed_collateral,
-            "formula": "s = (y1 - y2) * (x1 - x2)^(-1) mod q",
+            "formula": "s = (y1 - y2) * (x1 - x2)^(-1) mod L",
         }

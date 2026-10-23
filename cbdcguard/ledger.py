@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 import uuid
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from cbdcguard.offline import (
-    GENERATOR_G,
-    PRIME_P,
     DoubleSpendAlert,
     OfflineCoin,
     OfflineSpendPacket,
     OfflineWallet,
+    public_point,
     recover_double_spend_secret,
 )
 from cbdcguard.policy_vm import (
@@ -111,7 +112,10 @@ class TransferOutcome:
 class CBDCLedger:
     """Unified Programmable CBDC UTXO & Offline Double-Spend Guard Ledger."""
 
-    def __init__(self) -> None:
+    def __init__(self, issuer_key: Ed25519PrivateKey | None = None) -> None:
+        # The central bank's coin-signing key; offline terminals hold only the public half
+        self.issuer_key = issuer_key or Ed25519PrivateKey.generate()
+        self.issuer_public_key = self.issuer_key.public_key()
         self.policies: dict[str, PBMPolicy] = build_preset_policies()
         self.merchants: dict[str, MerchantProfile] = {}
         self.utxos: dict[str, CBDCUTXO] = {}
@@ -120,7 +124,8 @@ class CBDCLedger:
 
         # Offline NFC state
         self.offline_wallets: dict[str, OfflineWallet] = {}
-        self.commitment_to_wallet: dict[int, str] = {}
+        self.commitment_to_wallet: dict[bytes, str] = {}
+        self.issued_coins: dict[str, OfflineCoin] = {}
         self.pending_offline_packets: list[OfflineSpendPacket] = []
         self.synced_coin_transcripts: dict[str, OfflineSpendPacket] = {}
         self.double_spend_alerts: list[DoubleSpendAlert] = []
@@ -334,8 +339,12 @@ class CBDCLedger:
     ) -> OfflineCoin:
         if wallet_id not in self.offline_wallets:
             raise KeyError(f"Unknown offline wallet '{wallet_id}'.")
+        if coin_id is not None and coin_id in self.issued_coins:
+            raise ValueError(f"Coin ID '{coin_id}' has already been issued.")
         wallet = self.offline_wallets[wallet_id]
-        return wallet.mint_coin(amount=amount, coin_id=coin_id, blinding_r=blinding_r)
+        coin = wallet.mint_coin(amount=amount, coin_id=coin_id, blinding_r=blinding_r, issuer_key=self.issuer_key)
+        self.issued_coins[coin.coin_id] = coin
+        return coin
 
     def execute_offline_spend(
         self,
@@ -361,7 +370,7 @@ class CBDCLedger:
             nonce=actual_nonce,
             allow_counter_rollback=simulate_double_spend,
         )
-        if not packet.verify_terminal_proof():
+        if not packet.verify_terminal_proof(self.issuer_public_key):
             raise ValueError("Offline polynomial commitment verification failed at merchant terminal.")
         self.pending_offline_packets.append(packet)
         return packet
@@ -379,7 +388,7 @@ class CBDCLedger:
 
         while self.pending_offline_packets:
             pkt = self.pending_offline_packets.pop(0)
-            if not pkt.verify_terminal_proof():
+            if not pkt.verify_terminal_proof(self.issuer_public_key):
                 continue
 
             if pkt.coin_id not in self.synced_coin_transcripts:
@@ -406,7 +415,7 @@ class CBDCLedger:
                     x2=pkt.challenge_x,
                     y2=pkt.response_y,
                 )
-                verified_comm = pow(GENERATOR_G, s_rec, PRIME_P) == pkt.commitment_s
+                verified_comm = public_point(s_rec) == pkt.commitment_s
                 wallet_id = self.commitment_to_wallet.get(pkt.commitment_s, pkt.wallet_id)
                 wallet = self.offline_wallets.get(wallet_id)
                 owner_name = wallet.owner_name if wallet else "UNKNOWN"
