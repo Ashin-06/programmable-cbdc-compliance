@@ -385,17 +385,32 @@ class CBDCLedger:
         """
         settled_packets: list[dict[str, Any]] = []
         new_alerts: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
 
         while self.pending_offline_packets:
             pkt = self.pending_offline_packets.pop(0)
             if not pkt.verify_terminal_proof(self.issuer_public_key):
+                rejected.append({"packet_id": pkt.packet_id, "coin_id": pkt.coin_id, "reason": "INVALID_PROOF_OR_SIGNATURE"})
+                continue
+            issued = self.issued_coins.get(pkt.coin_id)
+            if issued is None or (
+                issued.wallet_id, issued.counter, issued.amount_paise, issued.commitment_s, issued.commitment_r
+            ) != (pkt.wallet_id, pkt.counter, round(pkt.amount * 100), pkt.commitment_s, pkt.commitment_r):
+                # The ledger's own issuance record is the authority, not the packet
+                rejected.append({"packet_id": pkt.packet_id, "coin_id": pkt.coin_id, "reason": "NOT_ISSUED_BY_LEDGER"})
                 continue
 
-            if pkt.coin_id not in self.synced_coin_transcripts:
+            first = self.synced_coin_transcripts.get(pkt.coin_id)
+            if first is not None and first.challenge_x == pkt.challenge_x:
+                # The same transcript submitted twice (merchant retry or replay): pay once, no alarm
+                rejected.append({"packet_id": pkt.packet_id, "coin_id": pkt.coin_id, "reason": "DUPLICATE_SUBMISSION"})
+                continue
+
+            if first is None:
                 self.synced_coin_transcripts[pkt.coin_id] = pkt
                 self.honest_offline_settlements += 1
                 if pkt.merchant_id in self.merchants:
-                    self.merchants[pkt.merchant_id].balance_general_erupee += pkt.amount
+                    self.merchants[pkt.merchant_id].balance_general_erupee += issued.amount
                 settled_packets.append(
                     {
                         "packet_id": pkt.packet_id,
@@ -407,7 +422,7 @@ class CBDCLedger:
                     }
                 )
             else:
-                first_pkt = self.synced_coin_transcripts[pkt.coin_id]
+                first_pkt = first
                 # Double-spend detected! Interpolate the hidden line L(x) = s*x + r mod q
                 s_rec, r_rec = recover_double_spend_secret(
                     x1=first_pkt.challenge_x,
@@ -452,8 +467,10 @@ class CBDCLedger:
         return {
             "settled_count": len(settled_packets),
             "double_spends_detected": len(new_alerts),
+            "rejected_count": len(rejected),
             "settled_packets": settled_packets,
             "double_spend_alerts": new_alerts,
+            "rejected_packets": rejected,
             "total_double_spend_alerts": len(self.double_spend_alerts),
         }
 

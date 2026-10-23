@@ -282,3 +282,21 @@ def test_terminal_rejects_coins_the_issuer_did_not_sign() -> None:
     good = ledger.execute_offline_spend("WALLET-NFC-01", "OFFCOIN-NFC01-001", "M-AGRI-PUNE")
     assert good.verify_terminal_proof(ledger.issuer_public_key)
     assert not replace(good, amount=50000.0).verify_terminal_proof(ledger.issuer_public_key)
+
+
+def test_sync_pays_only_issued_coins_and_survives_duplicate_transcripts() -> None:
+    ledger = build_demo_ledger()
+    merchant = ledger.merchants["M-AGRI-PUNE"]
+    before = merchant.balance_general_erupee
+    pkt = ledger.execute_offline_spend("WALLET-NFC-01", "OFFCOIN-NFC01-001", "M-AGRI-PUNE", nonce="n-1")
+    # The merchant terminal retries the same packet; it used to raise mid-batch (x1 == x2)
+    ledger.pending_offline_packets.append(pkt)
+    # A coin signed by the issuer but missing from the ledger's own records is refused
+    stray = OfflineWallet.create("WALLET-NFC-01", "same id, other device")
+    stray_coin = stray.mint_coin(500.0, coin_id="OFFCOIN-STRAY", issuer_key=ledger.issuer_key)
+    ledger.pending_offline_packets.append(stray.sign_offline_spend(stray_coin.coin_id, "M-AGRI-PUNE", 1, "n-2"))
+    report = ledger.sync_offline_batch()
+    assert report["settled_count"] == 1
+    assert {r["reason"] for r in report["rejected_packets"]} == {"DUPLICATE_SUBMISSION", "NOT_ISSUED_BY_LEDGER"}
+    assert report["double_spends_detected"] == 0
+    assert merchant.balance_general_erupee == before + 500.0
