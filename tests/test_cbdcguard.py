@@ -300,3 +300,20 @@ def test_sync_pays_only_issued_coins_and_survives_duplicate_transcripts() -> Non
     assert {r["reason"] for r in report["rejected_packets"]} == {"DUPLICATE_SUBMISSION", "NOT_ISSUED_BY_LEDGER"}
     assert report["double_spends_detected"] == 0
     assert merchant.balance_general_erupee == before + 500.0
+
+
+def test_ledger_rejects_reused_ids_and_nan_amounts() -> None:
+    ledger = build_demo_ledger()
+    ledger.transfer_utxo("UTXO-FOOD-102", "M-FOOD-MUM", amount=3500.0)
+    assert ledger.utxos["UTXO-FOOD-102"].status == "SPENT"
+    with pytest.raises(ValueError):  # would have reset the spent UTXO to UNSPENT
+        ledger.mint_utxo("BENEFICIARY-PRIYA-MH", 3500.0, "PBM-FOOD-02", utxo_id="UTXO-FOOD-102")
+    with pytest.raises(ValueError):
+        ledger.mint_offline_coin("WALLET-NFC-01", 500.0, coin_id="OFFCOIN-NFC01-001")
+    with pytest.raises(ValueError):
+        ledger.mint_utxo("X", float("nan"))
+    with pytest.raises(ValueError):
+        ledger.transfer_utxo("UTXO-HEALTH-103", "M-HEALTH-DEL", amount=float("nan"))
+    from cbdcguard.policy_vm import PBMPolicy as _P
+    with pytest.raises(ValueError):  # would re-scope every UTXO bound to PBM-AGRI-01
+        ledger.register_policy(_P(policy_id="PBM-AGRI-01", name="anything goes"))

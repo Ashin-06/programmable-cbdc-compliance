@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
 import uuid
 
@@ -132,6 +133,10 @@ class CBDCLedger:
         self.honest_offline_settlements: int = 0
 
     def register_policy(self, policy: PBMPolicy) -> PBMPolicy:
+        existing = self.policies.get(policy.policy_id)
+        if existing is not None and existing is not policy:
+            # Replacing a policy would silently re-scope every UTXO already bound to it
+            raise ValueError(f"Policy ID '{policy.policy_id}' is already registered.")
         self.policies[policy.policy_id] = policy
         return policy
 
@@ -153,11 +158,14 @@ class CBDCLedger:
             policy_id = custom_policy.policy_id
         if policy_id not in self.policies:
             raise KeyError(f"Unknown PBM policy_id '{policy_id}'.")
-        if amount <= 0:
-            raise ValueError("Mint amount must be positive.")
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError("Mint amount must be a positive finite number.")
 
         policy = self.policies[policy_id]
         uid = utxo_id or f"UTXO-{uuid.uuid4().hex[:8].upper()}"
+        if uid in self.utxos:
+            # Overwriting would turn a SPENT or SWEPT UTXO back into a fresh UNSPENT one
+            raise ValueError(f"UTXO ID '{uid}' already exists.")
         utxo = CBDCUTXO(
             utxo_id=uid,
             owner_id=owner_id,
@@ -188,7 +196,7 @@ class CBDCLedger:
 
         merchant = self.merchants[merchant_id]
         spend_amount = round(float(amount if amount is not None else utxo.amount), 2)
-        if spend_amount <= 0 or spend_amount > utxo.amount + 1e-9:
+        if not math.isfinite(spend_amount) or spend_amount <= 0 or spend_amount > utxo.amount + 1e-9:
             raise ValueError(f"Invalid spend amount {spend_amount} for UTXO balance {utxo.amount}.")
 
         policy = self.policies[utxo.policy_id]
