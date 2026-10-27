@@ -51,7 +51,7 @@ def run_benchmark() -> dict[str, Any]:
         allowed_mccs={5261, 5191},
         blocked_mccs={7995, 6011},
         allowed_regions={"IN-MH", "IN-KA"},
-        max_tx_amount=10000.0,
+        max_tx_paise=1_000_000,
         expires_at=1_700_000_000,
         unwrap_on_settlement=True,
         require_verified_merchant=True,
@@ -72,44 +72,44 @@ def run_benchmark() -> dict[str, Any]:
 
         if bucket in (0, 1):
             # Valid Agri Subsidy spend -> should approve & unwrap to PBM-GENERAL
-            ledger.mint_utxo(f"USER-{i}", 5000.0, "PBM-AGRI-01", utxo_id=utxo_id)
-            res = ledger.transfer_utxo(utxo_id, "M-VALID-AGRI", amount=5000.0, timestamp=1_760_000_000)
+            ledger.mint_utxo(f"USER-{i}", 500_000, "PBM-AGRI-01", utxo_id=utxo_id)
+            res = ledger.transfer_utxo(utxo_id, "M-VALID-AGRI", amount_paise=500_000, timestamp=1_760_000_000)
             expected_allowed = True
             expected_code = None
         elif bucket == 2:
             # Valid Food Voucher spend -> should approve & unwrap to PBM-GENERAL
-            ledger.mint_utxo(f"USER-{i}", 2500.0, "PBM-FOOD-02", utxo_id=utxo_id)
-            res = ledger.transfer_utxo(utxo_id, "M-VALID-FOOD", amount=2500.0, timestamp=1_760_000_000)
+            ledger.mint_utxo(f"USER-{i}", 250_000, "PBM-FOOD-02", utxo_id=utxo_id)
+            res = ledger.transfer_utxo(utxo_id, "M-VALID-FOOD", amount_paise=250_000, timestamp=1_760_000_000)
             expected_allowed = True
             expected_code = None
         elif bucket == 3:
             # Blocked MCC (7995 gambling) -> should block with ERR_MCC_BLOCKED
-            ledger.mint_utxo(f"USER-{i}", 5000.0, "PBM-AGRI-01", utxo_id=utxo_id)
-            res = ledger.transfer_utxo(utxo_id, "M-GAMBLING", amount=1000.0, timestamp=1_760_000_000)
+            ledger.mint_utxo(f"USER-{i}", 500_000, "PBM-AGRI-01", utxo_id=utxo_id)
+            res = ledger.transfer_utxo(utxo_id, "M-GAMBLING", amount_paise=100_000, timestamp=1_760_000_000)
             expected_allowed = False
             expected_code = "ERR_MCC_BLOCKED"
         elif bucket == 4:
             # Disallowed MCC (spending Agri voucher at Hospital MCC 8062) -> ERR_MCC_NOT_ALLOWED
-            ledger.mint_utxo(f"USER-{i}", 5000.0, "PBM-AGRI-01", utxo_id=utxo_id)
-            res = ledger.transfer_utxo(utxo_id, "M-VALID-HEALTH", amount=2000.0, timestamp=1_760_000_000)
+            ledger.mint_utxo(f"USER-{i}", 500_000, "PBM-AGRI-01", utxo_id=utxo_id)
+            res = ledger.transfer_utxo(utxo_id, "M-VALID-HEALTH", amount_paise=200_000, timestamp=1_760_000_000)
             expected_allowed = False
             expected_code = "ERR_MCC_NOT_ALLOWED"
         elif bucket == 5:
             # Out-of-region geofence violation (IN-AS not in allowed_regions) -> ERR_REGION_OUT_OF_BOUNDS
-            ledger.mint_utxo(f"USER-{i}", 5000.0, "PBM-AGRI-01", utxo_id=utxo_id)
-            res = ledger.transfer_utxo(utxo_id, "M-OUT-OF-REGION", amount=2000.0, timestamp=1_760_000_000)
+            ledger.mint_utxo(f"USER-{i}", 500_000, "PBM-AGRI-01", utxo_id=utxo_id)
+            res = ledger.transfer_utxo(utxo_id, "M-OUT-OF-REGION", amount_paise=200_000, timestamp=1_760_000_000)
             expected_allowed = False
             expected_code = "ERR_REGION_OUT_OF_BOUNDS"
         elif bucket == 6:
-            # Exceeds per-transaction ceiling (30,000 > 25,000 max_tx_amount) -> ERR_MAX_TX_AMOUNT_EXCEEDED
-            ledger.mint_utxo(f"USER-{i}", 35000.0, "PBM-AGRI-01", utxo_id=utxo_id)
-            res = ledger.transfer_utxo(utxo_id, "M-VALID-AGRI", amount=30000.0, timestamp=1_760_000_000)
+            # Exceeds per-transaction ceiling (30,000 > 25,000 rupee max_tx_paise) -> ERR_MAX_TX_AMOUNT_EXCEEDED
+            ledger.mint_utxo(f"USER-{i}", 3_500_000, "PBM-AGRI-01", utxo_id=utxo_id)
+            res = ledger.transfer_utxo(utxo_id, "M-VALID-AGRI", amount_paise=3_000_000, timestamp=1_760_000_000)
             expected_allowed = False
             expected_code = "ERR_MAX_TX_AMOUNT_EXCEEDED"
         else:
             # Expired voucher spend attempt -> ERR_UTXO_EXPIRED_CLAWBACK + auto-sweep to sponsor
-            ledger.mint_utxo(f"USER-{i}", 4000.0, "PBM-BENCH-EXP", utxo_id=utxo_id)
-            res = ledger.transfer_utxo(utxo_id, "M-VALID-AGRI", amount=4000.0, timestamp=1_760_000_000)
+            ledger.mint_utxo(f"USER-{i}", 400_000, "PBM-BENCH-EXP", utxo_id=utxo_id)
+            res = ledger.transfer_utxo(utxo_id, "M-VALID-AGRI", amount_paise=400_000, timestamp=1_760_000_000)
             expected_allowed = False
             expected_code = "ERR_UTXO_EXPIRED_CLAWBACK"
 
@@ -140,8 +140,8 @@ def run_benchmark() -> dict[str, Any]:
     # 75 Honest single-show offline transactions
     for i in range(honest_coins_count):
         wid = f"W-HONEST-{i:03d}"
-        w = ledger.register_offline_wallet(wid, f"Honest Citizen {i}", collateral_balance=10000.0)
-        coin = ledger.mint_offline_coin(wid, amount=200.0, coin_id=f"COIN-H-{i:03d}")
+        w = ledger.register_offline_wallet(wid, f"Honest Citizen {i}", collateral_paise=1_000_000)
+        coin = ledger.mint_offline_coin(wid, amount_paise=20_000, coin_id=f"COIN-H-{i:03d}")
         ledger.execute_offline_spend(
             wallet_id=wid,
             coin_id=coin.coin_id,
@@ -154,9 +154,9 @@ def run_benchmark() -> dict[str, Any]:
     # 25 Offline Double-Spend Attacks (each coin spent at two distinct terminals with x1 != x2)
     for j in range(double_spend_attacks_count):
         wid = f"W-ATTACKER-{j:03d}"
-        w = ledger.register_offline_wallet(wid, f"Double-Spender {j}", collateral_balance=20000.0)
+        w = ledger.register_offline_wallet(wid, f"Double-Spender {j}", collateral_paise=2_000_000)
         expected_attacker_secrets[wid] = w.secret_s
-        coin = ledger.mint_offline_coin(wid, amount=1500.0, coin_id=f"COIN-DS-{j:03d}")
+        coin = ledger.mint_offline_coin(wid, amount_paise=150_000, coin_id=f"COIN-DS-{j:03d}")
         # Spend 1 at Merchant A
         ledger.execute_offline_spend(
             wallet_id=wid,
@@ -180,14 +180,14 @@ def run_benchmark() -> dict[str, Any]:
 
     # Verify exact secret key recovery on all 25 double-spends and 0% leakage on all 75 honest wallets
     exact_recoveries = 0
-    for alert in ledger.double_spend_alerts:
-        true_s = expected_attacker_secrets.get(alert.wallet_id)
-        if true_s is not None and alert.recovered_secret_s == true_s and alert.verified_against_commitment:
+    for alert in ledger.alerts():
+        true_s = expected_attacker_secrets.get(alert["wallet_id"])
+        if true_s is not None and int(alert["recovered_secret_s_hex"], 16) == true_s and alert["verified_against_commitment"]:
             exact_recoveries += 1
 
     honest_leaks = 0
     for i in range(honest_coins_count):
-        w = ledger.offline_wallets[f"W-HONEST-{i:03d}"]
+        w = ledger.wallet(f"W-HONEST-{i:03d}")
         if w.recovered_secret_s is not None or w.slashed:
             honest_leaks += 1
 

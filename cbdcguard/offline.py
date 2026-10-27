@@ -27,6 +27,8 @@ import nacl.bindings as sodium
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
+from cbdcguard.money import rupees
+
 # Order of the Ed25519 prime-order subgroup
 ED25519_L: int = 2**252 + 27742317777372353535851937790883648493
 _IDENTITY = bytes([1]) + bytes(31)
@@ -111,16 +113,12 @@ class OfflineCoin:
     coin_id: str
     wallet_id: str
     counter: int
-    amount: float
-    blinding_r: int
+    amount_paise: int
+    blinding_r: int | None  # None when loaded for display only
     commitment_s: bytes
     commitment_r: bytes
     issuer_signature: bytes = b""
-    spent_count: int = 0
-
-    @property
-    def amount_paise(self) -> int:
-        return round(self.amount * 100)
+    spent_count: int = 0  # the wallet's secure-element counter for this coin
 
     def message(self) -> bytes:
         return coin_message(self.coin_id, self.wallet_id, self.counter, self.amount_paise, self.commitment_s, self.commitment_r)
@@ -131,7 +129,8 @@ class OfflineCoin:
             "coin_id": self.coin_id,
             "wallet_id": self.wallet_id,
             "counter": self.counter,
-            "amount": self.amount,
+            "amount": rupees(self.amount_paise),
+            "amount_paise": self.amount_paise,
             "commitment_s_hex": self.commitment_s.hex(),
             "commitment_r_hex": self.commitment_r.hex(),
             "issuer_signature_hex": self.issuer_signature.hex(),
@@ -145,12 +144,12 @@ class OfflineWallet:
 
     wallet_id: str
     owner_name: str
-    secret_s: int
+    secret_s: int | None  # None when loaded for display only
     commitment_s: bytes
-    collateral_balance: float = 25000.0
+    collateral_paise: int = 2_500_000
     monotonic_counter: int = 0
     slashed: bool = False
-    slashed_amount: float = 0.0
+    slashed_paise: int = 0
     recovered_secret_s: int | None = None
     coins: dict[str, OfflineCoin] = field(default_factory=dict)
 
@@ -159,7 +158,7 @@ class OfflineWallet:
         cls,
         wallet_id: str,
         owner_name: str,
-        collateral_balance: float = 25000.0,
+        collateral_paise: int = 2_500_000,
         secret_s: int | None = None,
     ) -> OfflineWallet:
         s = secret_s if secret_s is not None else random_scalar()
@@ -168,12 +167,12 @@ class OfflineWallet:
             owner_name=owner_name,
             secret_s=s,
             commitment_s=public_point(s),
-            collateral_balance=collateral_balance,
+            collateral_paise=collateral_paise,
         )
 
     def mint_coin(
         self,
-        amount: float,
+        amount_paise: int,
         coin_id: str | None = None,
         blinding_r: int | None = None,
         issuer_key: Ed25519PrivateKey | None = None,
@@ -181,6 +180,8 @@ class OfflineWallet:
         """Create a coin committed to L(x) = s*x + r; the issuer signs it if a key is given."""
         if self.slashed:
             raise ValueError(f"Offline wallet '{self.wallet_id}' is slashed and blacklisted.")
+        if not isinstance(amount_paise, int) or amount_paise <= 0:
+            raise ValueError("Coin amount must be a positive whole number of paise.")
         cid = coin_id or f"OFFCOIN-{self.wallet_id}-{self.monotonic_counter + 1:03d}"
         if cid in self.coins:
             # Re-minting an existing ID would reset its spend counter and allow a re-spend
@@ -191,7 +192,7 @@ class OfflineWallet:
             coin_id=cid,
             wallet_id=self.wallet_id,
             counter=self.monotonic_counter,
-            amount=float(amount),
+            amount_paise=amount_paise,
             blinding_r=r,
             commitment_s=self.commitment_s,
             commitment_r=public_point(r),
@@ -230,7 +231,7 @@ class OfflineWallet:
             coin_id=coin.coin_id,
             wallet_id=self.wallet_id,
             counter=coin.counter,
-            amount=coin.amount,
+            amount_paise=coin.amount_paise,
             merchant_id=merchant_id,
             timestamp=timestamp,
             nonce=nonce,
@@ -246,10 +247,12 @@ class OfflineWallet:
             "wallet_id": self.wallet_id,
             "owner_name": self.owner_name,
             "commitment_s_hex": self.commitment_s.hex(),
-            "collateral_balance": self.collateral_balance,
+            "collateral_balance": rupees(self.collateral_paise),
+            "collateral_paise": self.collateral_paise,
             "monotonic_counter": self.monotonic_counter,
             "slashed": self.slashed,
-            "slashed_amount": self.slashed_amount,
+            "slashed_amount": rupees(self.slashed_paise),
+            "slashed_paise": self.slashed_paise,
             "recovered_secret_s_hex": hex(self.recovered_secret_s) if self.recovered_secret_s is not None else None,
             "coins": [c.to_public_dict() for c in self.coins.values()],
         }
@@ -263,7 +266,7 @@ class OfflineSpendPacket:
     coin_id: str
     wallet_id: str
     counter: int
-    amount: float
+    amount_paise: int
     merchant_id: str
     timestamp: int
     nonce: str
@@ -281,7 +284,7 @@ class OfflineSpendPacket:
         try:
             issuer_public_key.verify(
                 self.issuer_signature,
-                coin_message(self.coin_id, self.wallet_id, self.counter, round(self.amount * 100),
+                coin_message(self.coin_id, self.wallet_id, self.counter, self.amount_paise,
                              self.commitment_s, self.commitment_r),
             )
         except InvalidSignature:
@@ -297,7 +300,8 @@ class OfflineSpendPacket:
             "coin_id": self.coin_id,
             "wallet_id": self.wallet_id,
             "counter": self.counter,
-            "amount": self.amount,
+            "amount": rupees(self.amount_paise),
+            "amount_paise": self.amount_paise,
             "merchant_id": self.merchant_id,
             "timestamp": self.timestamp,
             "nonce": self.nonce,
@@ -308,6 +312,16 @@ class OfflineSpendPacket:
             "issuer_signature_hex": self.issuer_signature.hex(),
         }
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> OfflineSpendPacket:
+        return cls(
+            packet_id=d["packet_id"], coin_id=d["coin_id"], wallet_id=d["wallet_id"], counter=d["counter"],
+            amount_paise=d["amount_paise"], merchant_id=d["merchant_id"], timestamp=d["timestamp"], nonce=d["nonce"],
+            challenge_x=int(d["challenge_x_hex"], 16), response_y=int(d["response_y_hex"], 16),
+            commitment_s=bytes.fromhex(d["commitment_s_hex"]), commitment_r=bytes.fromhex(d["commitment_r_hex"]),
+            issuer_signature=bytes.fromhex(d["issuer_signature_hex"]),
+        )
+
 
 @dataclass
 class DoubleSpendAlert:
@@ -317,7 +331,7 @@ class DoubleSpendAlert:
     wallet_id: str
     owner_name: str
     counter: int
-    amount_per_spend: float
+    amount_per_spend_paise: int
     merchant_1: str
     merchant_2: str
     x1: int
@@ -328,7 +342,7 @@ class DoubleSpendAlert:
     recovered_blinding_r: int
     commitment_s: bytes
     verified_against_commitment: bool
-    slashed_collateral: float
+    slashed_paise: int
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -336,7 +350,8 @@ class DoubleSpendAlert:
             "wallet_id": self.wallet_id,
             "owner_name": self.owner_name,
             "counter": self.counter,
-            "amount_per_spend": self.amount_per_spend,
+            "amount_per_spend": rupees(self.amount_per_spend_paise),
+            "amount_per_spend_paise": self.amount_per_spend_paise,
             "merchant_1": self.merchant_1,
             "merchant_2": self.merchant_2,
             "x1_hex": hex(self.x1),
@@ -347,6 +362,7 @@ class DoubleSpendAlert:
             "recovered_blinding_r_hex": hex(self.recovered_blinding_r),
             "commitment_s_hex": self.commitment_s.hex(),
             "verified_against_commitment": self.verified_against_commitment,
-            "slashed_collateral": self.slashed_collateral,
+            "slashed_collateral": rupees(self.slashed_paise),
+            "slashed_paise": self.slashed_paise,
             "formula": "s = (y1 - y2) * (x1 - x2)^(-1) mod L",
         }

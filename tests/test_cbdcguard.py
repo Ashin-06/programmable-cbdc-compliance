@@ -41,7 +41,7 @@ def test_pbm_policy_vm_compilation_and_valid_unwrap() -> None:
         merchant_mcc=5261,
         merchant_region="IN-MH",
         merchant_verified=True,
-        amount=8000.0,
+        amount_paise=800_000,
         timestamp=1_760_000_000,
         sender_kyc_tier=2,
     )
@@ -58,7 +58,7 @@ def test_pbm_policy_vm_blocks_violations() -> None:
     # 1. Blocked MCC (7995 gambling)
     res_gamble = PolicyStackVM.evaluate(
         agri,
-        SpendContext("M-GAMBLE", 7995, "IN-MH", True, 1000.0, 1_760_000_000),
+        SpendContext("M-GAMBLE", 7995, "IN-MH", True, 100_000, 1_760_000_000),
     )
     assert res_gamble.allowed is False
     assert res_gamble.violation_code == "ERR_MCC_BLOCKED"
@@ -66,7 +66,7 @@ def test_pbm_policy_vm_blocks_violations() -> None:
     # 2. Disallowed MCC (5411 grocery on an agri seed policy)
     res_wrong_mcc = PolicyStackVM.evaluate(
         agri,
-        SpendContext("M-GROCERY", 5411, "IN-MH", True, 1000.0, 1_760_000_000),
+        SpendContext("M-GROCERY", 5411, "IN-MH", True, 100_000, 1_760_000_000),
     )
     assert res_wrong_mcc.allowed is False
     assert res_wrong_mcc.violation_code == "ERR_MCC_NOT_ALLOWED"
@@ -74,7 +74,7 @@ def test_pbm_policy_vm_blocks_violations() -> None:
     # 3. Out-of-region geofence
     res_region = PolicyStackVM.evaluate(
         agri,
-        SpendContext("M-AGRI-ASSAM", 5261, "IN-AS", True, 1000.0, 1_760_000_000),
+        SpendContext("M-AGRI-ASSAM", 5261, "IN-AS", True, 100_000, 1_760_000_000),
     )
     assert res_region.allowed is False
     assert res_region.violation_code == "ERR_REGION_OUT_OF_BOUNDS"
@@ -82,7 +82,7 @@ def test_pbm_policy_vm_blocks_violations() -> None:
     # 4. Per-transaction ceiling exceeded
     res_ceiling = PolicyStackVM.evaluate(
         agri,
-        SpendContext("M-AGRI-PUNE", 5261, "IN-MH", True, 50000.0, 1_760_000_000),
+        SpendContext("M-AGRI-PUNE", 5261, "IN-MH", True, 5_000_000, 1_760_000_000),
     )
     assert res_ceiling.allowed is False
     assert res_ceiling.violation_code == "ERR_MAX_TX_AMOUNT_EXCEEDED"
@@ -90,7 +90,7 @@ def test_pbm_policy_vm_blocks_violations() -> None:
     # 5. Expired token triggers sponsor clawback flag
     res_expired = PolicyStackVM.evaluate(
         agri,
-        SpendContext("M-AGRI-PUNE", 5261, "IN-MH", True, 1000.0, 1_950_000_000),
+        SpendContext("M-AGRI-PUNE", 5261, "IN-MH", True, 100_000, 1_950_000_000),
     )
     assert res_expired.allowed is False
     assert res_expired.is_expired is True
@@ -101,8 +101,8 @@ def test_pbm_policy_vm_blocks_violations() -> None:
 def test_offline_polynomial_single_show_privacy_and_double_spend_recovery() -> None:
     issuer = Ed25519PrivateKey.generate()
     issuer_pub = issuer.public_key()
-    wallet = OfflineWallet.create("W-TEST-01", "Test User", collateral_balance=10000.0)
-    coin = wallet.mint_coin(amount=500.0, coin_id="COIN-TEST-01", issuer_key=issuer)
+    wallet = OfflineWallet.create("W-TEST-01", "Test User", collateral_paise=1_000_000)
+    coin = wallet.mint_coin(amount_paise=50_000, coin_id="COIN-TEST-01", issuer_key=issuer)
 
     # Honest first spend at terminal 1
     pkt1 = wallet.sign_offline_spend(
@@ -155,32 +155,32 @@ def test_ledger_unwrap_on_settlement_and_expiry_clawback() -> None:
     ledger = build_demo_ledger()
 
     # Partial spend of Agri UTXO (₹5,000 of ₹12,000) at verified Pune Agri merchant
-    outcome = ledger.transfer_utxo("UTXO-AGRI-101", "M-AGRI-PUNE", amount=5000.0)
+    outcome = ledger.transfer_utxo("UTXO-AGRI-101", "M-AGRI-PUNE", amount_paise=500_000)
     assert outcome.approved is True
     assert outcome.unwrapped is True
     assert outcome.new_merchant_utxo_id is not None
     assert outcome.change_utxo_id is not None
 
     # Merchant UTXO is now unwrapped into PBM-GENERAL and can be spent at Grocery (MCC 5411)
-    merchant_utxo = ledger.utxos[outcome.new_merchant_utxo_id]
+    merchant_utxo = ledger.utxo(outcome.new_merchant_utxo_id)
     assert merchant_utxo.policy_id == "PBM-GENERAL"
     assert merchant_utxo.unwrapped_from_policy == "PBM-AGRI-01"
 
-    second_hop = ledger.transfer_utxo(merchant_utxo.utxo_id, "M-FOOD-MUM", amount=2000.0)
+    second_hop = ledger.transfer_utxo(merchant_utxo.utxo_id, "M-FOOD-MUM", amount_paise=200_000)
     assert second_hop.approved is True
 
     # Farmer's change UTXO still carries PBM-AGRI-01 and is blocked at Grocery (MCC 5411)
-    change_utxo = ledger.utxos[outcome.change_utxo_id]
+    change_utxo = ledger.utxo(outcome.change_utxo_id)
     assert change_utxo.policy_id == "PBM-AGRI-01"
-    blocked_change = ledger.transfer_utxo(change_utxo.utxo_id, "M-FOOD-MUM", amount=1000.0)
+    blocked_change = ledger.transfer_utxo(change_utxo.utxo_id, "M-FOOD-MUM", amount_paise=100_000)
     assert blocked_change.approved is False
     assert blocked_change.eval_result.violation_code == "ERR_MCC_NOT_ALLOWED"
 
     # Expired UTXO-EXP-104 auto-sweeps to sponsor on spend attempt
-    exp_outcome = ledger.transfer_utxo("UTXO-EXP-104", "M-AGRI-PUNE", amount=4000.0, timestamp=1_760_000_000)
+    exp_outcome = ledger.transfer_utxo("UTXO-EXP-104", "M-AGRI-PUNE", amount_paise=400_000, timestamp=1_760_000_000)
     assert exp_outcome.approved is False
     assert exp_outcome.swept_to_sponsor is True
-    assert ledger.utxos["UTXO-EXP-104"].status == "SWEPT_EXPIRED"
+    assert ledger.utxo("UTXO-EXP-104").status == "SWEPT_EXPIRED"
 
 
 def test_full_benchmark_200_programmable_and_100_offline() -> None:
@@ -269,63 +269,66 @@ def test_terminal_rejects_coins_the_issuer_did_not_sign() -> None:
     # could invent a coin of any amount. Now the terminal needs the issuer's signature.
     ledger = build_demo_ledger()
     forger = OfflineWallet.create("W-FORGER", "Forger")
-    fake = forger.mint_coin(amount=99999.0, coin_id="OFFCOIN-FAKE")  # no issuer key
+    fake = forger.mint_coin(amount_paise=9_999_900, coin_id="OFFCOIN-FAKE")  # no issuer key
     pkt = forger.sign_offline_spend(fake.coin_id, "M-AGRI-PUNE", 1_760_000_000, "n1")
     assert pkt.verify_terminal_proof(ledger.issuer_public_key) is False
     other_issuer = Ed25519PrivateKey.generate()
-    fake2 = forger.mint_coin(amount=99999.0, coin_id="OFFCOIN-FAKE2", issuer_key=other_issuer)
+    fake2 = forger.mint_coin(amount_paise=9_999_900, coin_id="OFFCOIN-FAKE2", issuer_key=other_issuer)
     pkt2 = forger.sign_offline_spend(fake2.coin_id, "M-AGRI-PUNE", 1_760_000_000, "n2")
     assert pkt2.verify_terminal_proof(ledger.issuer_public_key) is False
     # Raising the amount on a genuine coin breaks the signature too
     from dataclasses import replace
     good = ledger.execute_offline_spend("WALLET-NFC-01", "OFFCOIN-NFC01-001", "M-AGRI-PUNE")
     assert good.verify_terminal_proof(ledger.issuer_public_key)
-    assert not replace(good, amount=50000.0).verify_terminal_proof(ledger.issuer_public_key)
+    assert not replace(good, amount_paise=5_000_000).verify_terminal_proof(ledger.issuer_public_key)
 
 
 def test_sync_pays_only_issued_coins_and_survives_duplicate_transcripts() -> None:
     ledger = build_demo_ledger()
-    merchant = ledger.merchants["M-AGRI-PUNE"]
-    before = merchant.balance_general_erupee
+    before = ledger.merchant("M-AGRI-PUNE").balance_paise
     pkt = ledger.execute_offline_spend("WALLET-NFC-01", "OFFCOIN-NFC01-001", "M-AGRI-PUNE", nonce="n-1")
     # The merchant terminal retries the same packet; it used to raise mid-batch (x1 == x2)
-    ledger.pending_offline_packets.append(pkt)
+    ledger.queue_packet(pkt)
     # A coin signed by the issuer but missing from the ledger's own records is refused
     stray = OfflineWallet.create("WALLET-NFC-01", "same id, other device")
-    stray_coin = stray.mint_coin(500.0, coin_id="OFFCOIN-STRAY", issuer_key=ledger.issuer_key)
-    ledger.pending_offline_packets.append(stray.sign_offline_spend(stray_coin.coin_id, "M-AGRI-PUNE", 1, "n-2"))
+    stray_coin = stray.mint_coin(50_000, coin_id="OFFCOIN-STRAY", issuer_key=ledger.issuer_key)
+    ledger.queue_packet(stray.sign_offline_spend(stray_coin.coin_id, "M-AGRI-PUNE", 1, "n-2"))
     report = ledger.sync_offline_batch()
     assert report["settled_count"] == 1
     assert {r["reason"] for r in report["rejected_packets"]} == {"DUPLICATE_SUBMISSION", "NOT_ISSUED_BY_LEDGER"}
     assert report["double_spends_detected"] == 0
-    assert merchant.balance_general_erupee == before + 500.0
+    assert ledger.merchant("M-AGRI-PUNE").balance_paise == before + 50_000
 
 
 def test_ledger_rejects_reused_ids_and_nan_amounts() -> None:
     ledger = build_demo_ledger()
-    ledger.transfer_utxo("UTXO-FOOD-102", "M-FOOD-MUM", amount=3500.0)
-    assert ledger.utxos["UTXO-FOOD-102"].status == "SPENT"
+    ledger.transfer_utxo("UTXO-FOOD-102", "M-FOOD-MUM", amount_paise=350_000)
+    assert ledger.utxo("UTXO-FOOD-102").status == "SPENT"
     with pytest.raises(ValueError):  # would have reset the spent UTXO to UNSPENT
-        ledger.mint_utxo("BENEFICIARY-PRIYA-MH", 3500.0, "PBM-FOOD-02", utxo_id="UTXO-FOOD-102")
+        ledger.mint_utxo("BENEFICIARY-PRIYA-MH", 350_000, "PBM-FOOD-02", utxo_id="UTXO-FOOD-102")
     with pytest.raises(ValueError):
-        ledger.mint_offline_coin("WALLET-NFC-01", 500.0, coin_id="OFFCOIN-NFC01-001")
+        ledger.mint_offline_coin("WALLET-NFC-01", 50_000, coin_id="OFFCOIN-NFC01-001")
     with pytest.raises(ValueError):
         ledger.mint_utxo("X", float("nan"))
     with pytest.raises(ValueError):
-        ledger.transfer_utxo("UTXO-HEALTH-103", "M-HEALTH-DEL", amount=float("nan"))
+        ledger.transfer_utxo("UTXO-HEALTH-103", "M-HEALTH-DEL", amount_paise=float("nan"))
     from cbdcguard.policy_vm import PBMPolicy as _P
     with pytest.raises(ValueError):  # would re-scope every UTXO bound to PBM-AGRI-01
         ledger.register_policy(_P(policy_id="PBM-AGRI-01", name="anything goes"))
 
 
 def test_api_key_and_input_limits(monkeypatch) -> None:
+    import importlib
+    import json
+
     import cbdcguard.api as api
 
-    client = TestClient(app)
-    monkeypatch.setattr(api, "API_KEY", "s3cret")
+    monkeypatch.setenv("CBDCGUARD_API_KEYS", json.dumps({"s3cret": {"user": "t", "role": "admin"}}))
+    api = importlib.reload(api)
+    client = TestClient(api.app)
     assert client.post("/reset").status_code == 401
     assert client.post("/cbdc/mint", json={"owner_id": "X", "amount": 1e6}).status_code == 401
-    assert client.get("/health").status_code == 200
+    assert client.get("/healthz").status_code == 200
     hdr = {"X-API-Key": "s3cret"}
     assert client.post("/reset", headers=hdr).status_code == 200
     assert client.post("/cbdc/mint", json={"owner_id": "X", "amount": 1e12}, headers=hdr).status_code == 422

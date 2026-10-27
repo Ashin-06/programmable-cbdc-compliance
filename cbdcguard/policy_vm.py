@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from cbdcguard.money import rupees
+
 
 class OpCode(str, Enum):
     """Deterministic Stack VM opcodes for Purpose-Bound Money (PBM) spend verification."""
@@ -52,7 +54,7 @@ class PBMPolicy:
     allowed_mccs: set[int] = field(default_factory=set)
     blocked_mccs: set[int] = field(default_factory=lambda: {7995, 6011})
     allowed_regions: set[str] = field(default_factory=set)
-    max_tx_amount: float | None = None
+    max_tx_paise: int | None = None
     expires_at: int | None = None
     unwrap_on_settlement: bool = True
     require_verified_merchant: bool = True
@@ -68,13 +70,24 @@ class PBMPolicy:
             "allowed_mccs": sorted(self.allowed_mccs),
             "blocked_mccs": sorted(self.blocked_mccs),
             "allowed_regions": sorted(self.allowed_regions),
-            "max_tx_amount": self.max_tx_amount,
+            "max_tx_amount": rupees(self.max_tx_paise) if self.max_tx_paise is not None else None,
+            "max_tx_paise": self.max_tx_paise,
             "expires_at": self.expires_at,
             "unwrap_on_settlement": self.unwrap_on_settlement,
             "require_verified_merchant": self.require_verified_merchant,
             "min_kyc_tier": self.min_kyc_tier,
             "is_general_purpose": self.is_general_purpose,
         }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> PBMPolicy:
+        return cls(
+            policy_id=d["policy_id"], name=d["name"], description=d["description"], sponsor_id=d["sponsor_id"],
+            allowed_mccs=set(d["allowed_mccs"]), blocked_mccs=set(d["blocked_mccs"]),
+            allowed_regions=set(d["allowed_regions"]), max_tx_paise=d["max_tx_paise"], expires_at=d["expires_at"],
+            unwrap_on_settlement=d["unwrap_on_settlement"], require_verified_merchant=d["require_verified_merchant"],
+            min_kyc_tier=d["min_kyc_tier"], is_general_purpose=d["is_general_purpose"],
+        )
 
 
 @dataclass(frozen=True)
@@ -85,7 +98,7 @@ class SpendContext:
     merchant_mcc: int
     merchant_region: str
     merchant_verified: bool
-    amount: float
+    amount_paise: int
     timestamp: int
     sender_kyc_tier: int = 2
 
@@ -95,7 +108,7 @@ class SpendContext:
             "merchant_mcc": self.merchant_mcc,
             "merchant_region": self.merchant_region,
             "merchant_verified": self.merchant_verified,
-            "amount": self.amount,
+            "amount_paise": self.amount_paise,
             "timestamp": self.timestamp,
             "sender_kyc_tier": self.sender_kyc_tier,
         }
@@ -284,25 +297,25 @@ class PolicyCompiler:
             )
 
         # 6. Per-transaction ceiling check
-        if policy.max_tx_amount is not None:
+        if policy.max_tx_paise is not None:
             program.append(
                 Instruction(
                     opcode=OpCode.LOAD_CTX,
-                    operand="amount",
-                    comment="Load spend amount",
+                    operand="amount_paise",
+                    comment="Load spend amount (paise)",
                 )
             )
             program.append(
                 Instruction(
                     opcode=OpCode.PUSH_CONST,
-                    operand=float(policy.max_tx_amount),
-                    comment=f"Push max_tx_amount ceiling ({policy.max_tx_amount})",
+                    operand=int(policy.max_tx_paise),
+                    comment=f"Push max_tx_paise ceiling ({policy.max_tx_paise})",
                 )
             )
             program.append(
                 Instruction(
                     opcode=OpCode.OP_LTE,
-                    comment="Check amount <= max_tx_amount",
+                    comment="Check amount_paise <= max_tx_paise",
                 )
             )
             program.append(
@@ -411,7 +424,7 @@ class PolicyStackVM:
                 rhs = stack.pop()
                 lhs = stack.pop()
                 res = lhs >= rhs
-                stack.append(f"[{pc:02d}]" if False else res)
+                stack.append(res)
                 trace.append(f"[{pc:02d}] OP_GTE({lhs} >= {rhs}) -> {res}")
 
             elif op == OpCode.OP_EQ:
@@ -502,8 +515,8 @@ class PolicyStackVM:
             )
         if reason_code == "ERR_MAX_TX_AMOUNT_EXCEEDED":
             return (
-                f"Transaction amount ₹{ctx.amount:,.2f} exceeds per-transaction ceiling "
-                f"₹{policy.max_tx_amount:,.2f}."
+                f"Transaction amount ₹{rupees(ctx.amount_paise)} exceeds per-transaction ceiling "
+                f"₹{rupees(policy.max_tx_paise or 0)}."
             )
         if reason_code == "ERR_MERCHANT_UNVERIFIED":
             return f"Merchant '{ctx.merchant_id}' is not a verified CBDC merchant."
@@ -529,7 +542,7 @@ def build_preset_policies() -> dict[str, PBMPolicy]:
             allowed_mccs={5191, 5261},
             blocked_mccs={7995, 6011},
             allowed_regions={"IN-MH", "IN-KA", "IN-PB", "IN-UP"},
-            max_tx_amount=25000.0,
+            max_tx_paise=2_500_000,
             expires_at=1_900_000_000,
             unwrap_on_settlement=True,
             require_verified_merchant=True,
@@ -544,7 +557,7 @@ def build_preset_policies() -> dict[str, PBMPolicy]:
             allowed_mccs={5411, 5812},
             blocked_mccs={7995, 6011},
             allowed_regions={"IN-MH", "IN-KA", "IN-DL", "IN-TN", "IN-UP", "IN-WB"},
-            max_tx_amount=5000.0,
+            max_tx_paise=500_000,
             expires_at=1_900_000_000,
             unwrap_on_settlement=True,
             require_verified_merchant=True,
@@ -559,7 +572,7 @@ def build_preset_policies() -> dict[str, PBMPolicy]:
             allowed_mccs={8011, 8062, 5912},
             blocked_mccs={7995, 6011},
             allowed_regions={"IN-MH", "IN-KA", "IN-DL", "IN-TN", "IN-GJ", "IN-UP"},
-            max_tx_amount=100000.0,
+            max_tx_paise=10_000_000,
             expires_at=1_900_000_000,
             unwrap_on_settlement=True,
             require_verified_merchant=True,
@@ -574,7 +587,7 @@ def build_preset_policies() -> dict[str, PBMPolicy]:
             allowed_mccs=set(),
             blocked_mccs={7995},  # Illegal offshore gambling still blocked by baseline compliance
             allowed_regions=set(),
-            max_tx_amount=500000.0,
+            max_tx_paise=50_000_000,
             expires_at=None,
             unwrap_on_settlement=False,
             require_verified_merchant=False,
