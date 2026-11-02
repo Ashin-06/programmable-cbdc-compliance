@@ -193,12 +193,26 @@ def test_json_logs_carry_request_ids(capsys):
 
 def test_production_warns_and_refuses_reset(monkeypatch, tmp_path, capsys):
     env = {k.removeprefix("CBDCGUARD_"): v for k, v in prod_env(CBDCGUARD_DATABASE_URL=f"sqlite:///{tmp_path / 'p.db'}").items()}
-    api = boot(monkeypatch, **env)
+    api = boot(monkeypatch, **env, ACCEPT_UNREVIEWED_CRYPTO="yes")
     warnings = [json.loads(line) for line in capsys.readouterr().out.splitlines() if "UNREVIEWED" in line]
     assert warnings and warnings[0]["level"] == "WARNING" and "cryptographer" in warnings[0]["msg"]
     c = TestClient(api.app)
     assert c.post("/reset", headers={"x-api-key": KEY}).status_code == 403
     assert "reviewed" in c.post("/offline/sync", headers={"x-api-key": KEY}).json()["warning"]
+
+
+def test_production_refuses_unreviewed_crypto_without_consent(monkeypatch, tmp_path):
+    env = {k.removeprefix("CBDCGUARD_"): v for k, v in prod_env(CBDCGUARD_DATABASE_URL=f"sqlite:///{tmp_path / 'c.db'}").items()}
+    with pytest.raises(ops.ConfigError, match="CBDCGUARD_ACCEPT_UNREVIEWED_CRYPTO=yes"):
+        boot(monkeypatch, **env)
+    with pytest.raises(ops.ConfigError, match="reviewed by a cryptographer"):
+        boot(monkeypatch, **env, ACCEPT_UNREVIEWED_CRYPTO="no")
+    # through `serve` too: the error is raised while uvicorn imports the app
+    run_env = {k: v for k, v in os.environ.items() if not k.startswith("CBDCGUARD_")}
+    run_env.update(prod_env(CBDCGUARD_DATABASE_URL=f"sqlite:///{tmp_path / 'c.db'}"))
+    r = subprocess.run([sys.executable, "-m", "cbdcguard", "serve", "--port", "1"], env=run_env,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode != 0 and "configuration error" in r.stderr and "ACCEPT_UNREVIEWED_CRYPTO" in r.stderr
 
 
 def _url(tmp_path):

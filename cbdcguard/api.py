@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 import logging
+import os
 from pathlib import Path
 from typing import Any
 import uuid
@@ -35,6 +36,9 @@ OFFLINE_WARNING = ("the offline e-cash scheme is hand-written and has not been r
 
 settings = ops.load_settings()
 ops.setup_logging(settings.log_level)
+# before touching the database, so a refused start leaves no trace
+if settings.production and os.environ.get("CBDCGUARD_ACCEPT_UNREVIEWED_CRYPTO", "").strip().lower() != "yes":
+    raise ops.ConfigError(OFFLINE_WARNING + "; set CBDCGUARD_ACCEPT_UNREVIEWED_CRYPTO=yes to run anyway")
 store = db.connect(settings.database_url)
 LEDGER = CBDCLedger(
     engine=store,

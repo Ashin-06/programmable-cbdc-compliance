@@ -64,7 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         except ops.ConfigError as e:
             sys.exit(f"configuration error: {e}")
         ops.setup_logging(settings.log_level)
-        uvicorn.run("cbdcguard.api:app", host=settings.host, port=settings.port, log_config=None, access_log=False)
+        try:
+            uvicorn.run("cbdcguard.api:app", host=settings.host, port=settings.port, log_config=None, access_log=False)
+        except ops.ConfigError as e:  # raised while importing the app: the unreviewed-crypto acknowledgement
+            sys.exit(f"configuration error: {e}")
         return 0
 
     return 0

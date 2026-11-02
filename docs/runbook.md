@@ -8,6 +8,7 @@ How to deploy, configure and operate the ledger service. Commands assume the rep
 docker build -t programmable-cbdc-compliance:1.0.0 .
 python -m cbdcguard.ops keygen          # one API key per client, plus the issuer and wallet keys
 docker run -d --name cbdcguard -p 8018:8018 -v cbdcguard-data:/data \
+  -e CBDCGUARD_ACCEPT_UNREVIEWED_CRYPTO=yes \
   -e CBDCGUARD_KEYS_FILE=/run/secrets/cbdcguard-keys.json \
   -e CBDCGUARD_ISSUER_KEY=... -e CBDCGUARD_WALLET_KEY=... \
   programmable-cbdc-compliance:1.0.0
@@ -31,6 +32,7 @@ Without Docker: `pip install -r requirements.lock && pip install -e .`, then `cb
 | Variable | Required in production | Meaning |
 |---|---|---|
 | `CBDCGUARD_ENV` | — | `development` (default) or `production` |
+| `CBDCGUARD_ACCEPT_UNREVIEWED_CRYPTO` | `yes` | acknowledges that the offline e-cash scheme has not been reviewed by a cryptographer; production refuses to start without it |
 | `CBDCGUARD_API_KEYS` / `CBDCGUARD_KEYS_FILE` | yes | JSON `{"sha256:<hex>": {"user": "...", "role": "..."}}`. Roles: `issuer` (mint, sweep, sync, read), `payments` (spend, read), `auditor` (`/state`), `monitor` (`/metrics`), `admin` (all, plus `/reset` outside production and `/bench`) |
 | `CBDCGUARD_ISSUER_KEY` | yes | base64 Ed25519 private key seed, exactly 32 bytes |
 | `CBDCGUARD_WALLET_KEY` | yes | base64 AES-256-GCM key, exactly 32 bytes |

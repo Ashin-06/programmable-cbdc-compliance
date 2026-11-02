@@ -32,7 +32,8 @@ To run it in a container:
 docker build -t programmable-cbdc-compliance .
 python -m cbdcguard.ops keygen           # prints an API key, its hash, and issuer and wallet keys
 docker run -d -p 8018:8018 -v cbdcguard-data:/data -e CBDCGUARD_API_KEYS='{"sha256:...": {"user": "ops", "role": "admin"}}' \
-  -e CBDCGUARD_ISSUER_KEY=... -e CBDCGUARD_WALLET_KEY=... programmable-cbdc-compliance
+  -e CBDCGUARD_ISSUER_KEY=... -e CBDCGUARD_WALLET_KEY=... -e CBDCGUARD_ACCEPT_UNREVIEWED_CRYPTO=yes \
+  programmable-cbdc-compliance
 ```
 
 ## API
@@ -66,6 +67,7 @@ These are consistency checks on hand-built cases, not measurements. No CBDC tran
 | Variable | Purpose |
 |---|---|
 | `CBDCGUARD_ENV=production` | refuse to start without API keys, the issuer and wallet keys and a database |
+| `CBDCGUARD_ACCEPT_UNREVIEWED_CRYPTO=yes` | required in production: acknowledges that the offline e-cash scheme is hand-written and unreviewed |
 | `CBDCGUARD_ISSUER_KEY` | Ed25519 seed the issuer signs coins with |
 | `CBDCGUARD_WALLET_KEY` | key that seals the simulated wallets' secrets |
 | `CBDCGUARD_API_KEYS` / `CBDCGUARD_KEYS_FILE` | hashed API keys with roles |
@@ -80,3 +82,7 @@ These are consistency checks on hand-built cases, not measurements. No CBDC tran
 - The offline protocol has not been reviewed by a cryptographer, and the code has not had an independent security review.
 
 See [SECURITY.md](SECURITY.md) and [docs/threat-model.md](docs/threat-model.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
