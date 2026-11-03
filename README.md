@@ -21,7 +21,7 @@ How the policy machine and offline coins work is described in [docs/design.md](d
 
 ```bash
 python -m pip install -r requirements-dev.lock && python -m pip install -e .
-python -m pytest -q                      # 41 tests
+python -m pytest -q                      # 42 tests
 python -m cbdcguard bench
 python -m cbdcguard serve                # API and console on http://127.0.0.1:8018
 ```
