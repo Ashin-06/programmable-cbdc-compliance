@@ -45,7 +45,7 @@ from cbdcguard.policy_vm import (
     build_preset_policies,
 )
 
-LIST_LIMIT = 500  # ponytail: snapshot lists are capped; page through the tables if a real UI needs more
+LIST_LIMIT = 500  # Snapshot lists are capped; page through the tables if a real UI needs more
 _NEXT_SEQ = {  # constant SQL per table, so nothing is formatted into a query
     "transfers": "SELECT MAX(seq) FROM transfers",
     "offline_packets": "SELECT MAX(seq) FROM offline_packets",
@@ -179,7 +179,7 @@ class CBDCLedger:
         self._issuer_publics = [self.issuer_public_key, *(k.public_key() for k in previous_issuer_keys)]
         self._aead = AESGCM(wallet_key or AESGCM.generate_key(bit_length=256))
         self._old_aeads = [AESGCM(k) for k in previous_wallet_keys]  # still readable while rotating
-        self._lock = threading.Lock()  # ponytail: per process; other replicas are stopped by the SQL guards
+        self._lock = threading.Lock()  # Per process; other replicas are stopped by the SQL guards
         self._tx(self._seed_policies)
 
     # --- plumbing ------------------------------------------------------------------------
