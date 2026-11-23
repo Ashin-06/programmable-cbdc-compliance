@@ -382,7 +382,7 @@
       const ev = data.eval_result;
       if (data.approved) {
         document.getElementById('vm-status').innerHTML =
-          `<span style="color: var(--emerald); font-weight:700;">APPROVED</span> • Gas: ${ev.gas_used} • ` +
+          `<span style="color: var(--emerald); font-weight:700;">APPROVED</span> • Gas: ${esc(ev.gas_used)} • ` +
           (data.unwrapped ? `Auto-Unwrapped into General-Purpose e-Rupee (${esc(data.new_merchant_utxo_id)})` : `Settled (${esc(data.new_merchant_utxo_id)})`);
       } else {
         document.getElementById('vm-status').innerHTML =
@@ -424,7 +424,7 @@
           wallet_id: 'WALLET-NFC-01',
           coin_id: 'OFFCOIN-NFC01-001',
           merchant_id: 'M-AGRI-PUNE',
-          nonce: 'nfc-honest-' + Math.floor(Math.random() * 99999),
+          nonce: 'nfc-honest-' + crypto.randomUUID(),
           simulate_double_spend: false
         })
       });
